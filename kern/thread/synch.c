@@ -180,6 +180,13 @@ lock_destroy(struct lock *lock)
 	kfree(lock);
 }
 
+/*
+ * Acquire lock by making atomic operation
+ * If unable to acquire lock sleep in a wait channel
+ * Repeat the process until a lock can be acquired
+ * Once successful in acquiring the lock, release the spinlock
+ */
+
 void
 lock_acquire(struct lock *lock)
 {
@@ -249,6 +256,7 @@ cv_create(const char *name)
 		return NULL;
 	}
 
+	spinlock_init(&cv->cv_sp_lock);
 	return cv;
 }
 
@@ -258,9 +266,17 @@ cv_destroy(struct cv *cv)
 	KASSERT(cv != NULL);
 
 	wchan_destroy(cv->cv_wchan);
+	spinlock_cleanup(&cv->cv_sp_lock);
+
 	kfree(cv->cv_name);
 	kfree(cv);
 }
+
+ /*
+ * Do not sleep with the lock acquired
+ * Make sure the lock release and sleep is atomic operation
+ * Re-acquire lock once woken up
+ */
 
 void
 cv_wait(struct cv *cv, struct lock *lock)
@@ -269,12 +285,18 @@ cv_wait(struct cv *cv, struct lock *lock)
 	KASSERT(lock != NULL);
 	KASSERT(lock_do_i_hold(lock));
 
+	spinlock_acquire(&cv->cv_sp_lock);
+
 	lock_release(lock);
-	spinlock_acquire(&lock->lk_lock);
-	wchan_sleep(cv->cv_wchan, &lock->lk_lock);
-	spinlock_release(&lock->lk_lock);
+	wchan_sleep(cv->cv_wchan, &cv->cv_sp_lock);
+
+	spinlock_release(&cv->cv_sp_lock);
 	lock_acquire(lock);
 }
+
+/*
+ * Wake up the one lucky thread
+ */
 
 void
 cv_signal(struct cv *cv, struct lock *lock)
@@ -283,10 +305,16 @@ cv_signal(struct cv *cv, struct lock *lock)
 	KASSERT(lock != NULL);
 	KASSERT(lock_do_i_hold(lock));
 
-	spinlock_acquire(&lock->lk_lock);
-	wchan_wakeone(cv->cv_wchan, &lock->lk_lock);
-	spinlock_release(&lock->lk_lock);
+	spinlock_acquire(&cv->cv_sp_lock);
+
+	wchan_wakeone(cv->cv_wchan, &cv->cv_sp_lock);
+
+	spinlock_release(&cv->cv_sp_lock);
 }
+
+/*
+ * Wake up all the threads and let them fight for lock contention
+ */
 
 void
 cv_broadcast(struct cv *cv, struct lock *lock)
@@ -295,7 +323,9 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 	KASSERT(lock != NULL);
 	KASSERT(lock_do_i_hold(lock));
 
-	spinlock_acquire(&lock->lk_lock);
-	wchan_wakeall(cv->cv_wchan, &lock->lk_lock);
-	spinlock_release(&lock->lk_lock);
+	spinlock_acquire(&cv->cv_sp_lock);
+
+	wchan_wakeall(cv->cv_wchan, &cv->cv_sp_lock);
+
+	spinlock_release(&cv->cv_sp_lock);
 }
