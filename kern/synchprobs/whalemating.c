@@ -40,11 +40,30 @@
 #include <test.h>
 #include <synch.h>
 
+
+struct cv *cv_whale_male, *cv_whale_female, *cv_whale_matchmaker;
+int male_count, female_count, matchmaker_count;
+struct lock *whale_lock;
+
 /*
  * Called by the driver during initialization.
  */
 
 void whalemating_init() {
+	cv_whale_male = cv_create("whale_male");
+	KASSERT(cv_whale_male != NULL);
+
+	cv_whale_female = cv_create("whale_female");
+	KASSERT(cv_whale_female != NULL);
+
+	cv_whale_matchmaker = cv_create("whale_matchmaker");
+	KASSERT(cv_whale_matchmaker != NULL);
+
+	whale_lock = lock_create("whale_lock");
+	KASSERT(whale_lock != NULL);
+
+	male_count = female_count = matchmaker_count = 0;
+
 	return;
 }
 
@@ -54,38 +73,92 @@ void whalemating_init() {
 
 void
 whalemating_cleanup() {
+	cv_destroy(cv_whale_male);
+	cv_destroy(cv_whale_female);
+	cv_destroy(cv_whale_matchmaker);
+	lock_destroy(whale_lock);
+
+	return;
+}
+
+/*
+ * The male should start mating if at least a female and a matchmaker whales are present.
+ * If the male cannot mate then wait in a channel and wait for a female whale or a matchmaker
+ * whale to wake up the male whale.
+ * Reduce the counters of female and matchmaker whales to disallow other whales from pairing
+ * up with these whales.
+ */
+void
+male(uint32_t index) {
+	male_start(index);
+
+	lock_acquire(whale_lock);
+	male_count++;
+
+	if (female_count > 0 && matchmaker_count > 0) {
+		female_count--;
+		cv_signal(cv_whale_female, whale_lock);
+
+		matchmaker_count--;
+		cv_signal(cv_whale_matchmaker, whale_lock);
+
+		male_count--;
+	} else {
+		cv_wait(cv_whale_male, whale_lock);
+	}
+
+	male_end(index);
+	lock_release(whale_lock);
+
 	return;
 }
 
 void
-male(uint32_t index)
-{
-	(void)index;
-	/*
-	 * Implement this function by calling male_start and male_end when
-	 * appropriate.
-	 */
+female(uint32_t index) {
+	female_start(index);
+
+	lock_acquire(whale_lock);
+	female_count++;
+
+	if (male_count > 0 && matchmaker_count > 0) {
+		male_count--;
+		cv_signal(cv_whale_male, whale_lock);
+
+		matchmaker_count--;
+		cv_signal(cv_whale_matchmaker, whale_lock);
+
+		female_count--;
+	} else {
+		cv_wait(cv_whale_female, whale_lock);
+	}
+
+	female_end(index);
+	lock_release(whale_lock);
+
 	return;
 }
 
 void
-female(uint32_t index)
-{
-	(void)index;
-	/*
-	 * Implement this function by calling female_start and female_end when
-	 * appropriate.
-	 */
-	return;
-}
+matchmaker(uint32_t index) {
+	matchmaker_start(index);
 
-void
-matchmaker(uint32_t index)
-{
-	(void)index;
-	/*
-	 * Implement this function by calling matchmaker_start and matchmaker_end
-	 * when appropriate.
-	 */
+	lock_acquire(whale_lock);
+	matchmaker_count++;
+
+	if (female_count > 0 && male_count > 0) {
+		male_count--;
+		cv_signal(cv_whale_male, whale_lock);
+
+		female_count--;
+		cv_signal(cv_whale_female, whale_lock);
+
+		matchmaker_count--;
+	} else {
+		cv_wait(cv_whale_matchmaker, whale_lock);
+	}
+
+	matchmaker_end(index);
+	lock_release(whale_lock);
+
 	return;
 }
