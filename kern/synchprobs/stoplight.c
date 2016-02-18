@@ -70,11 +70,42 @@
 #include <synch.h>
 
 /*
- * Called by the driver during initialization.
+ * Called by the driver during initialization
  */
+
+struct semaphore *intersection;
+
+/*
+ * Locks for each of the quadrants
+ */
+
+struct lock *lock_0;
+struct lock *lock_1;
+struct lock *lock_2;
+struct lock *lock_3;
 
 void
 stoplight_init() {
+
+	/*
+	 * In an intersection there have to be 3 cars at any point in time to avoid deadlock
+	 */
+
+	intersection = sem_create("intersection", 3);
+	KASSERT(intersection != NULL);
+
+	lock_0 = lock_create("lock_0");
+	KASSERT(lock_0 != NULL);
+
+	lock_1 = lock_create("lock_1");
+	KASSERT(lock_1 != NULL);
+
+	lock_2 = lock_create("lock_2");
+	KASSERT(lock_2 != NULL);
+
+	lock_3 = lock_create("lock_3");
+	KASSERT(lock_3 != NULL);
+
 	return;
 }
 
@@ -83,36 +114,155 @@ stoplight_init() {
  */
 
 void stoplight_cleanup() {
+	sem_destroy(intersection);
+	lock_destroy(lock_0);
+	lock_destroy(lock_1);
+	lock_destroy(lock_2);
+	lock_destroy(lock_3);
+	return;
+}
+
+/*
+ * Helper functions to guide the cars going in a specific direction with requisite locks
+ */
+
+void right_and_leave(struct lock *lock_11, uint32_t direction, uint32_t index);
+void straight_and_leave(struct lock *lock_11, struct lock *lock_21, uint32_t direction, uint32_t index);
+void left_and_leave(struct lock *lock_11, struct lock *lock_21, struct lock *lock_31, uint32_t direction, uint32_t index);
+
+/*
+ * Simplest of all the turns. Acquire the lock of the quadrant the car is present in, move forward and then leave
+ */
+
+void
+right_and_leave(struct lock *lock_11, uint32_t direction, uint32_t index) {
+
+	P(intersection);
+
+	lock_acquire(lock_11);
+	inQuadrant(direction, index);
+
+	leaveIntersection(index);
+	lock_release(lock_11);
+
+	V(intersection);
+
+	return;
+}
+
+/*
+ *  This move requires acquiring locks sequentially. Move a step forward into the quadrant once each lock is
+ *  acquired. Leave the intersection once in final quadrant and release the lock.
+ */
+
+void
+straight_and_leave(struct lock *lock_11, struct lock *lock_21, uint32_t direction, uint32_t index) {
+
+	P(intersection);
+
+	lock_acquire(lock_11);
+	inQuadrant(direction, index);
+
+	lock_acquire(lock_21);
+	inQuadrant((direction + 3) % 4, index);
+
+	lock_release(lock_11);
+
+	leaveIntersection(index);
+	lock_release(lock_21);
+
+	V(intersection);
+
+	return;
+}
+
+/*
+ *  This move requires acquiring locks sequentially. Move a step forward into the quadrant once each lock is
+ *  acquired. Leave the intersection once in final quadrant and release the lock.
+ */
+
+void
+left_and_leave(struct lock *lock_11, struct lock *lock_21, struct lock *lock_31, uint32_t direction, uint32_t index) {
+
+	P(intersection);
+
+	lock_acquire(lock_11);
+	inQuadrant(direction, index);
+
+	lock_acquire(lock_21);
+	inQuadrant((direction + 3) % 4, index);
+	lock_release(lock_11);
+
+	lock_acquire(lock_31);
+	inQuadrant((direction + 2) % 4, index);
+	lock_release(lock_21);
+
+	leaveIntersection(index);
+	lock_release(lock_31);
+
+	V(intersection);
+
 	return;
 }
 
 void
 turnright(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
+	switch(direction) {
+		case 0 :
+			right_and_leave(lock_0, direction, index);
+			break;
+		case 1 :
+			right_and_leave(lock_1, direction, index);
+			break;
+		case 2 :
+			right_and_leave(lock_2, direction, index);
+			break;
+		case 3 :
+			right_and_leave(lock_3, direction, index);
+			break;
+	}
 	return;
 }
+
 void
 gostraight(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
+	switch(direction) {
+		case 0 :
+			straight_and_leave(lock_0, lock_3, direction, index);
+			break;
+		case 1 :
+			straight_and_leave(lock_1, lock_0, direction, index);
+			break;
+		case 2 :
+			straight_and_leave(lock_2, lock_1, direction, index);
+			break;
+		case 3 :
+			straight_and_leave(lock_3, lock_2, direction, index);
+			break;
+	}
+
 	return;
 }
+
 void
 turnleft(uint32_t direction, uint32_t index)
 {
-	(void)direction;
-	(void)index;
-	/*
-	 * Implement this function.
-	 */
+	switch(direction) {
+		case 0 :
+			left_and_leave(lock_0, lock_3, lock_2, direction, index);
+			break;
+		case 1 :
+			left_and_leave(lock_1, lock_0, lock_3, direction, index);
+			break;
+		case 2 :
+			left_and_leave(lock_2, lock_1, lock_0, direction, index);
+			break;
+		case 3 :
+			left_and_leave(lock_3, lock_2, lock_1, direction, index);
+			break;
+	}
+
 	return;
 }

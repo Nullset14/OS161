@@ -41,8 +41,14 @@
 #include <synch.h>
 
 
-struct cv *cv_whale_male, *cv_whale_female, *cv_whale_matchmaker;
-int male_count, female_count, matchmaker_count;
+struct cv *cv_whale_male;
+struct cv *cv_whale_female;
+struct cv *cv_whale_matchmaker;
+
+int male_count;
+int female_count;
+int matchmaker_count;
+
 struct lock *whale_lock;
 
 /*
