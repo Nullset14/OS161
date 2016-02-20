@@ -126,9 +126,9 @@ void stoplight_cleanup() {
  * Helper functions to guide the cars going in a specific direction with requisite locks
  */
 
-void right_and_leave(struct lock *lock_11, uint32_t direction, uint32_t index);
-void straight_and_leave(struct lock *lock_11, struct lock *lock_21, uint32_t direction, uint32_t index);
-void left_and_leave(struct lock *lock_11, struct lock *lock_21, struct lock *lock_31, uint32_t direction, uint32_t index);
+void right_and_leave(struct lock *, uint32_t direction, uint32_t index);
+void straight_and_leave(struct lock *, struct lock *, uint32_t direction, uint32_t index);
+void left_and_leave(struct lock *, struct lock *, struct lock *, uint32_t direction, uint32_t index);
 
 /*
  * Simplest of all the turns. Acquire the lock of the quadrant the car is present in, move forward and then leave

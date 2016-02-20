@@ -329,3 +329,136 @@ cv_broadcast(struct cv *cv, struct lock *lock)
 
 	spinlock_release(&cv->cv_sp_lock);
 }
+
+struct
+rwlock *rwlock_create(const char *name) {
+
+	struct rwlock *rw_lock;
+
+	rw_lock = kmalloc(sizeof(*rw_lock));
+	if (rw_lock == NULL) {
+		return NULL;
+	}
+
+	rw_lock->rwlock_name = kstrdup(name);
+
+	if (rw_lock->rwlock_name==NULL) {
+		kfree(rw_lock);
+		return NULL;
+	}
+
+	rw_lock->rwlock_wchan = wchan_create(rw_lock->rwlock_name);
+	if (rw_lock->rwlock_wchan == NULL) {
+		kfree(rw_lock->rwlock_name);
+		kfree(rw_lock);
+		return NULL;
+	}
+
+	spinlock_init(&rw_lock->rwlock_lock);
+	rw_lock->writing = false;
+	rw_lock->reader_count = 0;
+
+	return rw_lock;
+}
+
+void
+rwlock_destroy(struct rwlock *rw_lock) {
+
+	KASSERT(rw_lock != NULL);
+	KASSERT(!rw_lock->writing);
+	KASSERT(rw_lock->reader_count == 0);
+
+	wchan_destroy(rw_lock->rwlock_wchan);
+	spinlock_cleanup(&rw_lock->rwlock_lock);
+
+	kfree(rw_lock->rwlock_name);
+	kfree(rw_lock);
+}
+
+/*
+ * Reader will wait in a channel if a writer is doing its job. Once it wakes up the count is increased.
+ */
+
+void
+rwlock_acquire_read(struct rwlock *rw_lock) {
+
+	KASSERT(rw_lock != NULL);
+
+	spinlock_acquire(&rw_lock->rwlock_lock);
+
+	while (rw_lock->writing) {
+		wchan_sleep(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
+	}
+
+	KASSERT(!rw_lock->writing);
+
+	rw_lock->reader_count++;
+	spinlock_release(&rw_lock->rwlock_lock);
+
+	return;
+}
+
+/*
+ * The reader decreases the reader count and and wakes up all threads.
+ */
+
+void
+rwlock_release_read(struct rwlock *rw_lock) {
+
+	KASSERT(rw_lock != NULL);
+	KASSERT(rw_lock->reader_count > 0);
+
+	spinlock_acquire(&rw_lock->rwlock_lock);
+
+	rw_lock->reader_count--;
+
+	wchan_wakeall(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
+
+	spinlock_release(&rw_lock->rwlock_lock);
+
+	return;
+}
+
+/*
+ * The writer waits in a channel until it gets writer lock. Once it gets the lock the boolean is set to true.
+ */
+
+void
+rwlock_acquire_write(struct rwlock *rw_lock) {
+
+	KASSERT(rw_lock != NULL);
+
+	spinlock_acquire(&rw_lock->rwlock_lock);
+
+	while (rw_lock->reader_count > 0 || rw_lock->writing) {
+		wchan_sleep(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
+	}
+
+	rw_lock->writing = true;
+
+	spinlock_release(&rw_lock->rwlock_lock);
+
+	return;
+}
+
+/*
+ * Release the lock by setting the boolean to false and wake up all threads.
+ */
+
+void
+rwlock_release_write(struct rwlock *rw_lock) {
+
+	KASSERT(rw_lock != NULL);
+	KASSERT(rw_lock->writing);
+
+	spinlock_acquire(&rw_lock->rwlock_lock);
+
+	rw_lock->writing = false;
+
+	wchan_wakeall(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
+
+	spinlock_release(&rw_lock->rwlock_lock);
+
+	return;
+
+}
