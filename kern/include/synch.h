@@ -153,6 +153,7 @@ struct rwlock {
 	struct wchan *rwlock_wchan;
 	struct spinlock rwlock_lock;
 	volatile unsigned rwlock_reader_count;
+	volatile unsigned rwlock_writer_count;
 	volatile bool rwlock_is_writing;
 };
 
