@@ -387,8 +387,7 @@ rwlock_acquire_read(struct rwlock *rw_lock) {
 
 	spinlock_acquire(&rw_lock->rwlock_lock);
 
-	while (rw_lock->rwlock_is_writing || (rw_lock->rwlock_reader_count > rw_lock->rwlock_writer_count
-										  && rw_lock->rwlock_writer_count > 0)) {
+	while (rw_lock->rwlock_is_writing || (random() % 2 == 0 && rw_lock->rwlock_writer_count > 0)) {
 		wchan_sleep(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
 	}
 
