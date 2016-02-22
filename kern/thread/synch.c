@@ -390,8 +390,7 @@ rwlock_acquire_read(struct rwlock *rw_lock) {
 
 	spinlock_acquire(&rw_lock->rwlock_lock);
 
-	while (rw_lock->rwlock_is_writing || rw_lock->rwlock_writer_waiting
-		   || (random() % 2 == 0 && rw_lock->rwlock_writer_count > 0)) {
+	while (rw_lock->rwlock_is_writing || rw_lock->rwlock_writer_waiting) {
 		wchan_sleep(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
 	}
 
@@ -417,6 +416,9 @@ rwlock_release_read(struct rwlock *rw_lock) {
 
 	rw_lock->rwlock_reader_count--;
 
+	if (rw_lock->rwlock_reader_count > 0 && random() % 2 == 0)
+		rw_lock->rwlock_writer_waiting = true;
+
 	wchan_wakeall(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
 
 	spinlock_release(&rw_lock->rwlock_lock);
@@ -438,11 +440,7 @@ rwlock_acquire_write(struct rwlock *rw_lock) {
 	rw_lock->rwlock_writer_count++;
 
 	while (rw_lock->rwlock_reader_count > 0 || rw_lock->rwlock_is_writing) {
-		rw_lock->rwlock_writer_waiting = true;
-
 		wchan_sleep(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
-
-		rw_lock->rwlock_writer_waiting = false;
 	}
 
 	rw_lock->rwlock_is_writing = true;
@@ -465,10 +463,11 @@ rwlock_release_write(struct rwlock *rw_lock) {
 	spinlock_acquire(&rw_lock->rwlock_lock);
 
 	rw_lock->rwlock_is_writing = false;
-
-	wchan_wakeall(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
+	rw_lock->rwlock_writer_waiting = false;
 
 	rw_lock->rwlock_writer_count--;
+
+	wchan_wakeall(rw_lock->rwlock_wchan, &rw_lock->rwlock_lock);
 
 	spinlock_release(&rw_lock->rwlock_lock);
 
