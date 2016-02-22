@@ -154,6 +154,7 @@ struct rwlock {
 	struct spinlock rwlock_lock;
 	volatile unsigned rwlock_reader_count;
 	volatile unsigned rwlock_writer_count;
+	volatile bool rwlock_writer_waiting;
 	volatile bool rwlock_is_writing;
 };
 
