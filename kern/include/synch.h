@@ -115,7 +115,7 @@ bool lock_do_i_hold(struct lock *);
 struct cv {
 	char *cv_name;
 	struct wchan *cv_wchan;
-	struct spinlock cv_sp_lock;
+	struct spinlock cv_lock;
 };
 
 struct cv *cv_create(const char *name);
@@ -152,8 +152,8 @@ struct rwlock {
 	char *rwlock_name;
 	struct wchan *rwlock_wchan;
 	struct spinlock rwlock_lock;
-	volatile unsigned reader_count;
-	volatile bool writing;
+	volatile unsigned rwlock_reader_count;
+	volatile bool rwlock_is_writing;
 };
 
 struct rwlock * rwlock_create(const char *);
