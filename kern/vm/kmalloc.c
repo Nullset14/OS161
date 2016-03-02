@@ -31,7 +31,7 @@
 #include <lib.h>
 #include <spinlock.h>
 #include <vm.h>
-#include <kern/secret.h>
+#include <kern/test161.h>
 #include <test.h>
 
 /*
@@ -838,7 +838,7 @@ kheap_printused(void)
 
 	char total_string[32];
 	snprintf(total_string, sizeof(total_string), "%lu", total);
-	ksecprintf(SECRET, total_string, "khu");
+	secprintf(SECRET, total_string, "khu");
 }
 
 ////////////////////////////////////////
@@ -995,6 +995,11 @@ subpage_kmalloc(size_t sz
 	if (prpage==0) {
 		/* Out of memory. */
 		kprintf("kmalloc: Subpage allocator couldn't get a page\n");
+		static int already_printed = 0;
+		if(!already_printed) {
+			already_printed = 1;
+			secprintf(SECRET, "out of memory", "kmalloc");
+		}
 		return NULL;
 	}
 	KASSERT(prpage % PAGE_SIZE == 0);
