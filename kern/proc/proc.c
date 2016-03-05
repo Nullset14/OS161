@@ -82,6 +82,12 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
+	/*
+	 * Initialize File Table
+	 */
+	for(int fd = 0; fd < OPEN_MAX; fd++)
+		proc->file_table[fd] = NULL;
+
 	return proc;
 }
 
