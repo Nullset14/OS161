@@ -119,17 +119,16 @@ thread_create(const char *name)
 	struct thread *thread;
 
 	DEBUGASSERT(name != NULL);
+	if (strlen(name) > MAX_NAME_LENGTH) {
+		return NULL;
+	}
 
 	thread = kmalloc(sizeof(*thread));
 	if (thread == NULL) {
 		return NULL;
 	}
 
-	thread->t_name = kstrdup(name);
-	if (thread->t_name == NULL) {
-		kfree(thread);
-		return NULL;
-	}
+	strcpy(thread->t_name, name);
 	thread->t_wchan_name = "NEW";
 	thread->t_state = S_READY;
 
@@ -256,6 +255,9 @@ cpu_create(unsigned hardware_number)
  * Nor can it be called on a running thread.
  *
  * (Freeing the stack you're actually using to run is ... inadvisable.)
+ *
+ * Thread destroy should finish the process of cleaning up a thread started by
+ * thread_exit.
  */
 static
 void
@@ -263,11 +265,6 @@ thread_destroy(struct thread *thread)
 {
 	KASSERT(thread != curthread);
 	KASSERT(thread->t_state != S_RUN);
-
-	/*
-	 * If you add things to struct thread, be sure to clean them up
-	 * either here or in thread_exit(). (And not both...)
-	 */
 
 	/* Thread subsystem fields */
 	KASSERT(thread->t_proc == NULL);
@@ -280,7 +277,6 @@ thread_destroy(struct thread *thread)
 	/* sheer paranoia */
 	thread->t_wchan_name = "DESTROYED";
 
-	kfree(thread->t_name);
 	kfree(thread);
 }
 
@@ -773,6 +769,13 @@ thread_startup(void (*entrypoint)(void *data1, unsigned long data2),
  * should be cleaned up right away. The rest has to wait until
  * thread_destroy is called from exorcise().
  *
+ * Note that any dynamically-allocated structures that can vary in size from
+ * thread to thread should be cleaned up here, not in thread_destroy. This is
+ * because the last thread left on each core runs the idle loop and does not
+ * get cleaned up until new threads are created. Differences in the amount of
+ * memory used by different threads after thread_exit will make it look like
+ * your kernel in leaking memory and cause some of the test161 checks to fail.
+ *
  * Does not return.
  */
 void
@@ -795,7 +798,7 @@ thread_exit(void)
 	thread_checkstack(cur);
 
 	/* Interrupts off on this processor */
-        splhigh();
+	splhigh();
 	thread_switch(S_ZOMBIE, NULL, NULL);
 	panic("braaaaaaaiiiiiiiiiiinssssss\n");
 }
