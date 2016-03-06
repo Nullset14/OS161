@@ -10,6 +10,7 @@
 #include <synch.h>
 #include <test.h>
 #include <kern/secret.h>
+#include <kern/test161.h>
 #include <spinlock.h>
 
 #define CREATELOOPS 2
@@ -21,7 +22,7 @@
 static struct rwlock *testrwlock = NULL;
 
 struct spinlock status_lock;
-static bool test_status = FAIL;
+static bool test_status = TEST161_FAIL;
 
 
 int rwtest(int nargs, char **args) {
@@ -58,7 +59,7 @@ int rwtest2(int nargs, char **args) {
 
     kprintf_n("Starting rwt2...\n");
 
-    test_status = SUCCESS;
+    test_status = TEST161_SUCCESS;
 
     for (i=0; i<CREATELOOPS; i++) {
         testrwlock = rwlock_create("testlock");
@@ -94,7 +95,7 @@ int rwtest3(int nargs, char **args) {
 
     kprintf_n("Starting rwt3...\n");
 
-    test_status = SUCCESS;
+    test_status = TEST161_SUCCESS;
 
     for (i=0; i<CREATELOOPS; i++) {
         testrwlock = rwlock_create("testlock");
@@ -127,7 +128,7 @@ int rwtest4(int nargs, char **args) {
 
     kprintf_n("Starting rwt4...\n");
 
-    test_status = SUCCESS;
+    test_status = TEST161_SUCCESS;
 
     for (i=0; i<CREATELOOPS; i++) {
         testrwlock = rwlock_create("testlock");
@@ -160,7 +161,7 @@ int rwtest5(int nargs, char **args) {
 
     kprintf_n("Starting rwt5...\n");
 
-    test_status = SUCCESS;
+    test_status = TEST161_SUCCESS;
 
     for (i=0; i<CREATELOOPS; i++) {
         testrwlock = rwlock_create("testlock");

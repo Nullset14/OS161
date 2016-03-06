@@ -30,6 +30,7 @@
 #include <types.h>
 #include <kern/errno.h>
 #include <kern/syscall.h>
+#include <kern/file_syscalls.h>
 #include <lib.h>
 #include <mips/trapframe.h>
 #include <thread.h>
@@ -98,23 +99,55 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval = 0;
+	err = 0;
 
 	switch (callno) {
-	    case SYS_reboot:
-		err = sys_reboot(tf->tf_a0);
-		break;
+		case SYS_reboot:
+			err = sys_reboot(tf->tf_a0);
+			break;
 
-	    case SYS___time:
-		err = sys___time((userptr_t)tf->tf_a0,
-				 (userptr_t)tf->tf_a1);
-		break;
+		case SYS___time:
+			err = sys___time((userptr_t)tf->tf_a0,
+							 (userptr_t)tf->tf_a1);
+			break;
 
-	    /* Add stuff here */
+			/* Add stuff here */
 
-	    default:
-		kprintf("Unknown syscall %d\n", callno);
-		err = ENOSYS;
-		break;
+		case SYS_open:
+			retval = sys_open((char *)tf->tf_a0, (int)tf->tf_a1, (mode_t)tf->tf_a2, &err);
+			break;
+
+		case SYS_read:
+			retval = sys_read((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2, &err);
+			break;
+
+		case SYS_write:
+			retval = sys_write((int)tf->tf_a0, (void *)tf->tf_a1, (size_t)tf->tf_a2, &err);
+			break;
+
+		case SYS_close:
+			retval = sys_close((int)tf->tf_a0, &err);
+			break;
+
+		case SYS_dup2:
+			retval = sys_dup2((int)tf->tf_a0, (int)tf->tf_a1, &err);
+			break;
+
+		case SYS_chdir:
+			retval = sys_chdir((char *)tf->tf_a0, &err);
+			break;
+
+		case SYS___getcwd:
+			retval = sys___getcwd((char *)tf->tf_a0, (int)tf->tf_a1, &err);
+			break;
+
+		case SYS_lseek:
+			retval = sys_lseek((int)tf->tf_a0, (off_t)tf->tf_a2, (off_t)tf->tf_a3, &err);
+
+		default:
+			kprintf("Unknown syscall %d\n", callno);
+			err = ENOSYS;
+			break;
 	}
 
 
