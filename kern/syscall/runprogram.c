@@ -44,6 +44,7 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
+#include <kern/file_syscalls.h>
 
 /*
  * Load program "progname" and start running it in usermode.
@@ -78,6 +79,9 @@ runprogram(char *progname)
 	/* Switch to it and activate it. */
 	proc_setas(as);
 	as_activate();
+
+	/* Initialize standard IO */
+	std_io_init();
 
 	/* Load the executable. */
 	result = load_elf(v, &entrypoint);
