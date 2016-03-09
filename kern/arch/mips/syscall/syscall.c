@@ -36,7 +36,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
-
+#include <copyinout.h>
 
 /*
  * System call dispatcher.
@@ -99,6 +99,10 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval = 0;
+	int64_t retval64 = 0;
+	int64_t pos64;
+	int whence;
+
 	err = 0;
 
 	switch (callno) {
@@ -142,7 +146,15 @@ syscall(struct trapframe *tf)
 			break;
 
 		case SYS_lseek:
-			retval = sys_lseek((int)tf->tf_a0, (off_t)tf->tf_a2, (off_t)tf->tf_a3, &err);
+			pos64 = tf->tf_a2;
+			pos64 <<= 32;
+			pos64 |= tf->tf_a3;
+
+			copyin((const_userptr_t) (tf->tf_sp + 16), &whence, sizeof(whence));
+			retval64 = sys_lseek((int)tf->tf_a0, (off_t)pos64, whence, &err);
+			tf->tf_v1 = 0;
+
+			break;
 
 		default:
 			kprintf("Unknown syscall %d\n", callno);
@@ -162,6 +174,12 @@ syscall(struct trapframe *tf)
 	}
 	else {
 		/* Success. */
+
+		if (retval64 > 0){
+			retval = (int32_t)(retval64 >> 32);
+			tf->tf_v1 = (int32_t)retval64;
+		}
+
 		tf->tf_v0 = retval;
 		tf->tf_a3 = 0;      /* signal no error */
 	}

@@ -13,6 +13,8 @@
 #include <kern/iovec.h>
 #include <copyinout.h>
 #include <vnode.h>
+#include <kern/seek.h>
+#include <kern/stat.h>
 
 /* File Open System Call */
 int
@@ -82,7 +84,7 @@ sys_read(int fd, void *buf, size_t buflen, int *err) {
         return -1;
     }
 
-    if ((curproc->file_table[fd]->fh_flags & O_RDONLY) != O_RDONLY) {
+    if (curproc->file_table[fd]->fh_flags & O_WRONLY) {
         *err = EACCES;
         return -1;
     }
@@ -154,7 +156,7 @@ sys_write(int fd, void *buf, size_t buflen, int *err) {
         return -1;
     }
 
-    if ((curproc->file_table[fd]->fh_flags & O_WRONLY) != O_WRONLY) {
+    if (curproc->file_table[fd]->fh_flags & O_RDONLY) {
         *err = EACCES;
         return -1;
     }
@@ -231,8 +233,17 @@ int sys_close(int fd, int *err) {
 
     curproc->file_table[fd]->fh_reference_count--;
 
+    /* Release file descriptor */
     if (curproc->file_table[fd]->fh_reference_count == 0) {
-       vfs_close(curproc->file_table[fd]->fh_vnode);
+        vfs_close(curproc->file_table[fd]->fh_vnode);
+
+        lock_release(curproc->file_table[fd]->fh_lock);
+        lock_destroy(curproc->file_table[fd]->fh_lock);
+
+        curproc->file_table[fd] = NULL;
+        kfree(curproc->file_table[fd]);
+
+        return 0;
     }
 
     /* Release lock file descriptor */
@@ -370,13 +381,85 @@ sys___getcwd(char *buf, size_t buflen, int *err) {
 off_t
 sys_lseek(int fd, off_t pos, int whence, int *err) {
 
-    (void)fd;
-    (void)pos;
-    (void)whence;
-    (void)err;
+    /* Validations */
 
-    int new_position =0;
+    if (fd < 0 || fd > OPEN_MAX) {
+        *err = EBADF;
+        return -1;
+    }
 
+    if (pos < 0) {
+        *err = EINVAL;
+        return -1;
+    }
+
+    if (curproc->file_table[fd] == NULL) {
+        *err = EBADF;
+        return -1;
+    }
+
+    int new_position = -1;
+
+    switch(whence) {
+
+        /* the new position is pos */
+        case SEEK_SET:
+            lock_acquire(curproc->file_table[fd]->fh_lock);
+
+            curproc->file_table[fd]->fh_offset = pos;
+            new_position = curproc->file_table[fd]->fh_offset;
+
+            if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
+                *err = EINVAL;
+                return -1;
+            }
+
+            lock_release(curproc->file_table[fd]->fh_lock);
+            break;
+
+        /* the new position is the current position plus pos */
+        case SEEK_CUR:
+            lock_acquire(curproc->file_table[fd]->fh_lock);
+
+            curproc->file_table[fd]->fh_offset += pos;
+            new_position = curproc->file_table[fd]->fh_offset;
+
+            if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
+                *err = EINVAL;
+                return -1;
+            }
+
+            lock_release(curproc->file_table[fd]->fh_lock);
+            break;
+
+        /* the new position is the position of end-of-file plus pos */
+        case SEEK_END:
+            lock_acquire(curproc->file_table[fd]->fh_lock);
+
+            struct stat statbuf;
+            int response = VOP_STAT(curproc->file_table[fd]->fh_vnode, &statbuf);
+            if (response) {
+                *err = response;
+                lock_release(curproc->file_table[fd]->fh_lock);
+                return -1;
+            }
+
+            curproc->file_table[fd]->fh_offset = pos +   statbuf.st_size;
+
+            if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
+                *err = EINVAL;
+                return -1;
+            }
+
+            new_position = curproc->file_table[fd]->fh_offset;
+
+            lock_release(curproc->file_table[fd]->fh_lock);
+            break;
+
+        default:
+            *err = EINVAL;
+            return -1;
+    }
 
     return new_position;
 }
@@ -385,16 +468,10 @@ sys_lseek(int fd, off_t pos, int whence, int *err) {
 int
 std_io_init() {
 
-    char read[]  = "con:";
-    char write[] = "con:";
-    char error[] = "con:";
-
-    char read_lock[]  = "read";
-    char write_lock[] = "write";
-    char error_lock[] = "error";
-
     int console_fd = 0;
     for(; console_fd < 3; console_fd++) {
+
+        char io[] = "con:";
 
         curproc->file_table[console_fd] = kmalloc(sizeof(struct file_handle));
         if (curproc->file_table[console_fd] == NULL) {
@@ -404,17 +481,15 @@ std_io_init() {
         curproc->file_table[console_fd]->fh_offset = 0;
         curproc->file_table[console_fd]->fh_reference_count = 1;
 
-        char *lock_name;
         int response = 0;
 
         switch(console_fd) {
             case 0  :
 
                 curproc->file_table[console_fd]->fh_flags = O_RDONLY;
-                response = vfs_open(read, O_RDONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
-                lock_name = read_lock;
-                curproc->file_table[console_fd]->fh_lock = lock_create(lock_name);
+                response = vfs_open(io, O_RDONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
 
+                curproc->file_table[console_fd]->fh_lock = lock_create("read");
                 if (curproc->file_table[console_fd]->fh_lock == NULL) {
                     response = ENOMEM;
                 }
@@ -433,10 +508,9 @@ std_io_init() {
             case 1  :
 
                 curproc->file_table[console_fd]->fh_flags = O_WRONLY;
-                response = vfs_open(write, O_WRONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
-                lock_name = write_lock;
-                curproc->file_table[console_fd]->fh_lock = lock_create(lock_name);
+                response = vfs_open(io, O_WRONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
 
+                curproc->file_table[console_fd]->fh_lock = lock_create("write");
                 if (curproc->file_table[console_fd]->fh_lock == NULL) {
                     response = ENOMEM;
                 }
@@ -445,7 +519,6 @@ std_io_init() {
 
                     lock_destroy(curproc->file_table[0]->fh_lock);
                     lock_destroy(curproc->file_table[1]->fh_lock);
-
 
                     vfs_close(curproc->file_table[0]->fh_vnode);
                     vfs_close(curproc->file_table[1]->fh_vnode);
@@ -461,10 +534,9 @@ std_io_init() {
             case 2 :
 
                 curproc->file_table[console_fd]->fh_flags = O_WRONLY;
-                response = vfs_open(error, O_WRONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
-                lock_name = error_lock;
-                curproc->file_table[console_fd]->fh_lock = lock_create(lock_name);
+                response = vfs_open(io, O_WRONLY, 0664, &(curproc->file_table[console_fd]->fh_vnode));
 
+                curproc->file_table[console_fd]->fh_lock = lock_create("error");
                 if (curproc->file_table[console_fd]->fh_lock == NULL) {
                     response = ENOMEM;
                 }
