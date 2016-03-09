@@ -38,10 +38,12 @@
 
 #include <spinlock.h>
 #include <limits.h>
+#include <mips/trapframe.h>
 
 struct addrspace;
 struct thread;
 struct vnode;
+struct trapframe;
 
 /*
  * Process structure.
@@ -73,18 +75,37 @@ struct proc {
 
 	/* add more material here as needed */
 
+	/* Process id */
+	pid_t pid;
+
+	/* Parent process id */
+	pid_t ppid;
+
 	/* File Table */
 	struct file_handle *file_table[OPEN_MAX];
+
+	struct lock *exitlock;
+	struct cv *exitcv;
+
+	bool exit_flag;
+	int exit_code;
+	int exit_proc_counter;
 };
+
 
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
+
+extern struct proc *proc_ids[PID_MAX];
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);
 
 /* Create a fresh process for use by runprogram(). */
 struct proc *proc_create_runprogram(const char *name);
+
+/* Create a fresh process for use by runprogram(). */
+struct proc *proc_create_child(const char *name);
 
 /* Destroy a process. */
 void proc_destroy(struct proc *proc);
