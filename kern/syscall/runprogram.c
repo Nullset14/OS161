@@ -80,9 +80,6 @@ runprogram(char *progname)
 	proc_setas(as);
 	as_activate();
 
-	/* Initialize standard IO */
-	std_io_init();
-
 	/* Load the executable. */
 	result = load_elf(v, &entrypoint);
 	if (result) {
@@ -100,6 +97,9 @@ runprogram(char *progname)
 		/* p_addrspace will go away when curproc is destroyed */
 		return result;
 	}
+
+	/* Initialize standard IO */
+	std_io_init();
 
 	/* Warp to user mode. */
 	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
