@@ -46,6 +46,10 @@
 #include "opt-net.h"
 #include "opt-synchprobs.h"
 #include "opt-automationtest.h"
+#include <kern/process_syscalls.h>
+#include <proc.h>
+#include <synch.h>
+#include <current.h>
 
 /*
  * In-kernel menu and command dispatcher.
@@ -124,6 +128,8 @@ common_prog(int nargs, char **args)
 		return ENOMEM;
 	}
 
+	proc->ppid = curproc->pid;
+
 	result = thread_fork(args[0] /* thread name */,
 			proc /* new process */,
 			cmd_progthread /* thread function */,
@@ -138,6 +144,15 @@ common_prog(int nargs, char **args)
 	 * The new process will be destroyed when the program exits...
 	 * once you write the code for handling that.
 	 */
+	for (int i = 1; i < 128; i++) {
+		if (proc_ids[i] != NULL && proc_ids[i]->ppid == curproc->pid) {
+			lock_acquire(proc_ids[i]->exitlock);
+			cv_wait(proc_ids[i]->exitcv, proc_ids[i]->exitlock);
+			cv_signal(proc_ids[i]->exitcv, proc_ids[i]->exitlock);
+			lock_release(proc_ids[i]->exitlock);
+			break;
+		}
+	}
 
 	return 0;
 }
