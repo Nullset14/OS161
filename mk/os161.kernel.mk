@@ -103,6 +103,8 @@ $(KERNEL):
 	$(LD) $(KLDFLAGS) $(OBJS) vers.o -o $(KERNEL)
 	@echo '*** This is $(CONFNAME) build #'`cat version`' ***'
 	$(SIZE) $(KERNEL)
+	#automatically execute bmake install after bmake
+	bmake install	
 
 #
 # Use the -M argument to gcc to get it to output dependency information.

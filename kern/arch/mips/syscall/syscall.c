@@ -37,6 +37,8 @@
 #include <current.h>
 #include <syscall.h>
 #include <copyinout.h>
+#include <kern/process_syscalls.h>
+#include <proc.h>
 
 /*
  * System call dispatcher.
@@ -115,7 +117,22 @@ syscall(struct trapframe *tf)
 							 (userptr_t)tf->tf_a1);
 			break;
 
-			/* Add stuff here */
+		/* Add stuff here */
+		case SYS_fork:
+			retval = sys_fork(tf, &err);
+			break;
+
+		case SYS__exit:
+			sys_exit((int)tf->tf_a0);
+			break;
+
+		case SYS_waitpid:
+			retval = sys_waitpid((pid_t)tf->tf_a0, (int *)tf->tf_a1, (int)tf->tf_a2, &err);
+			break;
+
+		case SYS_getpid:
+			retval = sys_getpid();
+			break;
 
 		case SYS_open:
 			retval = sys_open((char *)tf->tf_a0, (int)tf->tf_a1, (mode_t)tf->tf_a2, &err);

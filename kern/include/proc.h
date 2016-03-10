@@ -96,7 +96,7 @@ struct proc {
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
 
-extern struct proc *proc_ids[PID_MAX];
+extern struct proc *proc_ids[PID_MAX_256];
 
 /* Call once during system startup to allocate data structures. */
 void proc_bootstrap(void);

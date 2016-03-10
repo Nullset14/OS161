@@ -48,11 +48,17 @@
 #include <current.h>
 #include <addrspace.h>
 #include <vnode.h>
+#include <synch.h>
+#include <kern/errno.h>
+#include <kern/process_syscalls.h>
+#include <kern/file_syscalls.h>
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+struct proc *proc_ids[PID_MAX_256];
 
 /*
  * Create a proc structure.
@@ -62,6 +68,8 @@ struct proc *
 proc_create(const char *name)
 {
 	struct proc *proc;
+
+	int err = 0;
 
 	proc = kmalloc(sizeof(*proc));
 	if (proc == NULL) {
@@ -81,6 +89,33 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
+
+	/* Assign PID */
+	proc->pid = spawn_pid(&err);
+
+	proc->ppid = -1;
+
+    proc->exit_flag = false;
+
+    proc->exit_code = -1;
+
+    proc->exit_proc_counter = 0;
+
+	proc->exitlock = lock_create("exitlock");
+	if (proc->exitlock == NULL) {
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
+	proc->exitcv = cv_create("exitcv");
+	if (proc->exitcv == NULL) {
+		kfree(proc->p_name);
+		kfree(proc);
+		return NULL;
+	}
+
+    proc_ids[proc->pid] = proc;
 
 	/*
 	 * Initialize File Table
@@ -323,4 +358,26 @@ proc_setas(struct addrspace *newas)
 	proc->p_addrspace = newas;
 	spinlock_release(&proc->p_lock);
 	return oldas;
+}
+
+struct proc *
+proc_create_child(const char *name)
+{
+	struct proc *childproc;
+
+	childproc = proc_create(name);
+	if (childproc == NULL) {
+		return NULL;
+	}
+
+	childproc->ppid = curproc->pid;
+	for(int fd=0;fd<OPEN_MAX;fd++)
+	{
+        childproc->file_table[fd] = curproc->file_table[fd];
+        if(childproc->file_table[fd] != NULL){
+			childproc->file_table[fd]->fh_reference_count++;
+		}
+	}
+
+	return childproc;
 }
