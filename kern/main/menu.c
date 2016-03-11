@@ -97,8 +97,13 @@ cmd_progthread(void *ptr, unsigned long nargs)
 	if (result) {
 		kprintf("Running program %s failed: %s\n", args[0],
 			strerror(result));
+
+		sys_exit(result);
 		return;
 	}
+
+	sys_exit(result);
+
 
 	/* NOTREACHED: runprogram only returns on error. */
 }
@@ -144,7 +149,11 @@ common_prog(int nargs, char **args)
 	 * The new process will be destroyed when the program exits...
 	 * once you write the code for handling that.
 	 */
-	for (int i = 1; i < 128; i++) {
+	int status;
+	int error;
+
+	sys_waitpid(proc->pid, &status, 0, &error);
+/*	for (int i = PID_MIN; i < PID_MAX_256; i++) {
 		if (proc_ids[i] != NULL && proc_ids[i]->ppid == curproc->pid) {
 			lock_acquire(proc_ids[i]->exitlock);
 			cv_wait(proc_ids[i]->exitcv, proc_ids[i]->exitlock);
@@ -152,7 +161,7 @@ common_prog(int nargs, char **args)
 			lock_release(proc_ids[i]->exitlock);
 			break;
 		}
-	}
+	}*/
 
 	return 0;
 }

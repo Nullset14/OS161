@@ -122,6 +122,10 @@ syscall(struct trapframe *tf)
 			retval = sys_fork(tf, &err);
 			break;
 
+		case SYS_execv:
+			retval = sys_execv((char *)tf->tf_a0,(char **)tf->tf_a1);
+			break;
+
 		case SYS__exit:
 			sys_exit((int)tf->tf_a0);
 			break;
