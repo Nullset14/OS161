@@ -22,8 +22,25 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
 {
 
     /* Add Validations Here*/
+    char *filename_copy = kmalloc(sizeof(char*) * NAME_MAX);
 
     int response = 0;
+    size_t actual = 0;
+
+    response = copyinstr((const_userptr_t)filename, filename_copy, NAME_MAX, &actual);
+
+    if (response) {
+        kfree(filename_copy);
+        *err = EFAULT;
+        return -1;
+    }
+
+    if (filename == NULL ) {
+        kfree(filename_copy);
+        *err = EFAULT;
+        return -1;
+    }
+
     int fd = 3;
 
     for (;fd < OPEN_MAX; fd++) {
@@ -36,6 +53,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         curproc->file_table[fd] = kmalloc(sizeof(struct file_handle));
         if (curproc->file_table[fd] == NULL) {
             kfree(curproc->file_table);
+            kfree(filename_copy);
             *err = ENOMEM;
             return -1;
         }
@@ -43,6 +61,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         curproc->file_table[fd]->fh_lock = lock_create("fd_lock");
         if (curproc->file_table[fd] == NULL) {
             kfree(curproc->file_table);
+            kfree(filename_copy);
             *err = ENOMEM;
             return -1;
         }
@@ -54,6 +73,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         response = vfs_open(filename, flags, mode, &(curproc->file_table[fd]->fh_vnode));
 
         if (response) {
+            kfree(filename_copy);
             *err = response;
             return -1;
         }
@@ -66,6 +86,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         return -1;
     }
 
+    kfree(filename_copy);
     return fd;
 }
 
@@ -74,8 +95,13 @@ ssize_t
 sys_read(int fd, void *buf, size_t buflen, int *err) {
 
     /* Validations */
+    if (fd < 0 || fd >= OPEN_MAX) {
+        *err = EBADF;
+        return -1;
+    }
+
     if (curproc->file_table[fd] == NULL) {
-        *err = ENOENT;
+        *err = EBADF;
         return -1;
     }
 
@@ -85,22 +111,16 @@ sys_read(int fd, void *buf, size_t buflen, int *err) {
     }
 
     if (curproc->file_table[fd]->fh_flags & O_WRONLY) {
-        *err = EACCES;
-        return -1;
-    }
-
-    if (buflen <= 0) {
-        *err = EINVAL;
-        return -1;
-    }
-
-    if (fd < 0 || fd > OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
 
-    int response = 0;
+    if (buflen <= 0) {
+        *err = EFAULT;
+        return -1;
+    }
 
+    int response = 0;
     struct uio read_uio;
     struct iovec read_iovec;
 
@@ -146,8 +166,13 @@ ssize_t
 sys_write(int fd, void *buf, size_t buflen, int *err) {
 
     /* Validations */
+    if (fd < 0 || fd >= OPEN_MAX) {
+        *err = EBADF;
+        return -1;
+    }
+
     if (curproc->file_table[fd] == NULL) {
-        *err = ENOENT;
+        *err = EBADF;
         return -1;
     }
 
@@ -157,16 +182,11 @@ sys_write(int fd, void *buf, size_t buflen, int *err) {
     }
 
     if (curproc->file_table[fd]->fh_flags & O_RDONLY) {
-        *err = EACCES;
+        *err = EBADF;
         return -1;
     }
 
     if (buflen <= 0) {
-        *err = EINVAL;
-        return -1;
-    }
-
-    if (fd < 0 || fd > OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
@@ -218,13 +238,13 @@ int sys_close(int fd, int *err) {
 
     /* Validations */
 
-    if (fd < 0 || fd > OPEN_MAX) {
+    if (fd < 0 || fd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
 
     if (curproc->file_table[fd] == NULL) {
-        *err = ENOENT;
+        *err = EBADF;
         return -1;
     }
 
@@ -258,12 +278,12 @@ sys_dup2(int oldfd, int newfd, int *err) {
 
     /* Validations */
 
-    if (oldfd < 0 || newfd > OPEN_MAX) {
+    if (oldfd <= 0 || oldfd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
 
-    if (newfd < 0 || newfd > OPEN_MAX) {
+    if (newfd <= 0 || newfd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
@@ -312,7 +332,6 @@ sys_dup2(int oldfd, int newfd, int *err) {
     }
 
     return newfd;
-
 }
 
 int
@@ -320,18 +339,27 @@ sys_chdir(char *pathname, int *err) {
 
     /* Validations */
 
-    if (pathname == NULL) {
+    char *pathname_copy = kmalloc(sizeof(char*) * PATH_MAX);
+
+    int response = 0;
+    size_t actual = 0;
+
+    response = copyinstr((const_userptr_t) pathname, pathname_copy, PATH_MAX, &actual);
+    if (response) {
+        kfree(pathname_copy);
         *err = EFAULT;
         return -1;
     }
 
-    int response = vfs_chdir(pathname);
+    response = vfs_chdir(pathname);
 
     if (response) {
+        kfree(pathname_copy);
         *err = response;
         return -1;
     }
 
+    kfree(pathname_copy);
     return 0;
 }
 

@@ -107,21 +107,90 @@ child_forkentry(void *data1, unsigned long data2){
     mips_usermode(&st_trapframe);
 };
 
+int
+sys_execv(char *progname, char **args) {
+
+    struct addrspace *as;
+    struct vnode *v;
+    vaddr_t entrypoint, stackptr;
+    int result;
+
+    (void)**args;
+
+    /* Open the file. */
+    result = vfs_open(progname, O_RDONLY, 0, &v);
+    if (result) {
+        return result;
+    }
+
+    curproc->p_addrspace = NULL;
+
+    as_destroy(curproc->p_addrspace);
+
+    /* We should be a new process. */
+    KASSERT(proc_getas() == NULL);
+
+    /* Create a new address space. */
+    as = as_create();
+    if (as == NULL) {
+        vfs_close(v);
+        return ENOMEM;
+    }
+
+    /* Switch to it and activate it. */
+    proc_setas(as);
+    as_activate();
+
+    /* Load the executable. */
+    result = load_elf(v, &entrypoint);
+    if (result) {
+        /* p_addrspace will go away when curproc is destroyed */
+        vfs_close(v);
+        return result;
+    }
+
+    /* Done with the file now. */
+    vfs_close(v);
+
+    /* Define the user stack in the address space */
+    result = as_define_stack(as, &stackptr);
+    if (result) {
+        /* p_addrspace will go away when curproc is destroyed */
+        return result;
+    }
+
+    /* Initialize standard IO */
+    std_io_init();
+
+    /* Warp to user mode. */
+    enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
+                      NULL /*userspace addr of environment*/,
+                      stackptr, entrypoint);
+
+    /* enter_new_process does not return. */
+    panic("enter_new_process returned\n");
+    return EINVAL;
+}
+
 pid_t
 sys_waitpid(pid_t pid, int *status, int options, int *err) {
 
-    if(options != 0){
+    if(status == (int*) 0x0) {
+        *err = EFAULT;
+        return -1;
+    }
+    if(status == (int*) 0x40000000 || status == (int*) 0x80000000 || ((int)status & 3) != 0) {
+        *err = EFAULT;
+        return -1;
+    }
+
+    if(options != 0 && options != WNOHANG && options != WUNTRACED){
         *err = EINVAL;
         return -1;
     }
 
-    if(pid < PID_MIN && pid > PID_MAX_256) {
+    if(pid < PID_MIN || pid > PID_MAX_256) {
         *err = ESRCH;
-        return -1;
-    }
-
-    if(status == NULL) {
-        *err = EFAULT;
         return -1;
     }
 
