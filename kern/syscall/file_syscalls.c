@@ -32,7 +32,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         return -1;
     }
 
-    char *filename_copy = kmalloc(sizeof(char*) * NAME_MAX);
+    char *filename_copy = kmalloc(sizeof(char) * NAME_MAX);
 
     int response = 0;
     size_t actual = 0;
