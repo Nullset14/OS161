@@ -22,6 +22,16 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
 {
 
     /* Add Validations Here*/
+    if (filename == NULL) {
+        *err = EFAULT;
+        return -1;
+    }
+
+    if (flags > O_NOCTTY) {
+        *err = EINVAL;
+        return -1;
+    }
+
     char *filename_copy = kmalloc(sizeof(char*) * NAME_MAX);
 
     int response = 0;
@@ -30,12 +40,6 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
     response = copyinstr((const_userptr_t)filename, filename_copy, NAME_MAX, &actual);
 
     if (response) {
-        kfree(filename_copy);
-        *err = EFAULT;
-        return -1;
-    }
-
-    if (filename == NULL ) {
         kfree(filename_copy);
         *err = EFAULT;
         return -1;
@@ -52,16 +56,18 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         /* Claim a file descriptor */
         curproc->file_table[fd] = kmalloc(sizeof(struct file_handle));
         if (curproc->file_table[fd] == NULL) {
-            kfree(curproc->file_table);
+            kfree(curproc->file_table[fd]);
             kfree(filename_copy);
+            curproc->file_table[fd] = NULL;
             *err = ENOMEM;
             return -1;
         }
 
         curproc->file_table[fd]->fh_lock = lock_create("fd_lock");
         if (curproc->file_table[fd] == NULL) {
-            kfree(curproc->file_table);
+            kfree(curproc->file_table[fd]);
             kfree(filename_copy);
+            curproc->file_table[fd] = NULL;
             *err = ENOMEM;
             return -1;
         }
@@ -70,10 +76,13 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         curproc->file_table[fd]->fh_flags = flags;
         curproc->file_table[fd]->fh_reference_count = 1;
 
-        response = vfs_open(filename, flags, mode, &(curproc->file_table[fd]->fh_vnode));
+        response = vfs_open(filename_copy, flags, mode, &(curproc->file_table[fd]->fh_vnode));
 
         if (response) {
+            kfree(curproc->file_table[fd]->fh_lock);
+            kfree(curproc->file_table[fd]);
             kfree(filename_copy);
+            curproc->file_table[fd] = NULL;
             *err = response;
             return -1;
         }
@@ -181,7 +190,7 @@ sys_write(int fd, void *buf, size_t buflen, int *err) {
         return -1;
     }
 
-    if (curproc->file_table[fd]->fh_flags & O_RDONLY) {
+    if (!(curproc->file_table[fd]->fh_flags & O_ACCMODE)) {
         *err = EBADF;
         return -1;
     }
@@ -237,7 +246,6 @@ sys_write(int fd, void *buf, size_t buflen, int *err) {
 int sys_close(int fd, int *err) {
 
     /* Validations */
-
     if (fd < 0 || fd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
@@ -259,9 +267,10 @@ int sys_close(int fd, int *err) {
 
         lock_release(curproc->file_table[fd]->fh_lock);
         lock_destroy(curproc->file_table[fd]->fh_lock);
+        kfree(curproc->file_table[fd]);
 
         curproc->file_table[fd] = NULL;
-        kfree(curproc->file_table[fd]);
+        //kfree(curproc->file_table[fd]);
 
         return 0;
     }
@@ -277,13 +286,12 @@ int
 sys_dup2(int oldfd, int newfd, int *err) {
 
     /* Validations */
-
-    if (oldfd <= 0 || oldfd >= OPEN_MAX) {
+    if (oldfd < 0 || oldfd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
 
-    if (newfd <= 0 || newfd >= OPEN_MAX) {
+    if (newfd < 0 || newfd >= OPEN_MAX) {
         *err = EBADF;
         return -1;
     }
@@ -293,43 +301,27 @@ sys_dup2(int oldfd, int newfd, int *err) {
         return -1;
     }
 
-    if (curproc->file_table[newfd] == NULL) {
-        *err = EBADF;
-        return -1;
+    if (newfd == oldfd) {
+        return newfd;
     }
 
     int response = 0;
+    lock_acquire(curproc->file_table[oldfd]->fh_lock);
 
-    int high, low;
+    if (curproc->file_table[newfd] != NULL) {
+        response = sys_close(newfd, err);
 
-    /* To avoid deadlock */
-    if (newfd > oldfd) {
-        high = newfd;
-        low  = oldfd;
-    } else if (oldfd > newfd) {
-        high = oldfd;
-        low = newfd;
-    } else {
-        *err = EBADF;
-        return -1;
+        if (response) {
+            lock_release(curproc->file_table[oldfd]->fh_lock);
+            *err = response;
+            return -1;
+        }
     }
 
-    lock_acquire(curproc->file_table[high]->fh_lock);
-    lock_acquire(curproc->file_table[low]->fh_lock);
+    curproc->file_table[newfd] = curproc->file_table[oldfd];
+    curproc->file_table[oldfd]->fh_reference_count++;
 
-    response = sys_close(newfd, err);
-
-    if (response == 0) {
-        curproc->file_table[newfd] = curproc->file_table[oldfd];
-        curproc->file_table[oldfd]->fh_reference_count++;
-    }
-
-    lock_acquire(curproc->file_table[low]->fh_lock);
-    lock_release(curproc->file_table[high]->fh_lock);
-
-    if (response) {
-        return -1;
-    }
+    lock_release(curproc->file_table[oldfd]->fh_lock);
 
     return newfd;
 }
@@ -339,7 +331,7 @@ sys_chdir(char *pathname, int *err) {
 
     /* Validations */
 
-    char *pathname_copy = kmalloc(sizeof(char*) * PATH_MAX);
+    char *pathname_copy = kmalloc(sizeof(char) * PATH_MAX);
 
     int response = 0;
     size_t actual = 0;
@@ -351,7 +343,7 @@ sys_chdir(char *pathname, int *err) {
         return -1;
     }
 
-    response = vfs_chdir(pathname);
+    response = vfs_chdir(pathname_copy);
 
     if (response) {
         kfree(pathname_copy);
@@ -411,13 +403,8 @@ sys_lseek(int fd, off_t pos, int whence, int *err) {
 
     /* Validations */
 
-    if (fd < 0 || fd > OPEN_MAX) {
+    if (fd < 0 || fd >= OPEN_MAX) {
         *err = EBADF;
-        return -1;
-    }
-
-    if (pos < 0) {
-        *err = EINVAL;
         return -1;
     }
 
@@ -432,20 +419,27 @@ sys_lseek(int fd, off_t pos, int whence, int *err) {
 
         /* the new position is pos */
         case SEEK_SET:
+
+            if (pos < 0) {
+                *err = EINVAL;
+                return -1;
+            }
+
             lock_acquire(curproc->file_table[fd]->fh_lock);
 
             curproc->file_table[fd]->fh_offset = pos;
             new_position = curproc->file_table[fd]->fh_offset;
 
             if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
-                *err = EINVAL;
+                lock_release(curproc->file_table[fd]->fh_lock);
+                *err = ESPIPE;
                 return -1;
             }
 
             lock_release(curproc->file_table[fd]->fh_lock);
             break;
 
-        /* the new position is the current position plus pos */
+            /* the new position is the current position plus pos */
         case SEEK_CUR:
             lock_acquire(curproc->file_table[fd]->fh_lock);
 
@@ -453,14 +447,15 @@ sys_lseek(int fd, off_t pos, int whence, int *err) {
             new_position = curproc->file_table[fd]->fh_offset;
 
             if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
-                *err = EINVAL;
+                lock_release(curproc->file_table[fd]->fh_lock);
+                *err = ESPIPE;
                 return -1;
             }
 
             lock_release(curproc->file_table[fd]->fh_lock);
             break;
 
-        /* the new position is the position of end-of-file plus pos */
+            /* the new position is the position of end-of-file plus pos */
         case SEEK_END:
             lock_acquire(curproc->file_table[fd]->fh_lock);
 
@@ -472,10 +467,10 @@ sys_lseek(int fd, off_t pos, int whence, int *err) {
                 return -1;
             }
 
-            curproc->file_table[fd]->fh_offset = pos +   statbuf.st_size;
-
+            curproc->file_table[fd]->fh_offset = pos + statbuf.st_size;
             if (!VOP_ISSEEKABLE(curproc->file_table[fd]->fh_vnode)) {
-                *err = EINVAL;
+                lock_release(curproc->file_table[fd]->fh_lock);
+                *err = ESPIPE;
                 return -1;
             }
 
@@ -523,7 +518,6 @@ std_io_init() {
                 }
 
                 if (response) {
-
                     lock_destroy(curproc->file_table[0]->fh_lock);
                     vfs_close(curproc->file_table[0]->fh_vnode);
                     kfree(curproc->file_table[0]);
@@ -544,7 +538,6 @@ std_io_init() {
                 }
 
                 if (response) {
-
                     lock_destroy(curproc->file_table[0]->fh_lock);
                     lock_destroy(curproc->file_table[1]->fh_lock);
 
@@ -570,7 +563,6 @@ std_io_init() {
                 }
 
                 if (response) {
-
                     lock_destroy(curproc->file_table[0]->fh_lock);
                     lock_destroy(curproc->file_table[1]->fh_lock);
                     lock_destroy(curproc->file_table[2]->fh_lock);

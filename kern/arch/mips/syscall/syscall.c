@@ -123,7 +123,7 @@ syscall(struct trapframe *tf)
 			break;
 
 		case SYS_execv:
-			retval = sys_execv((char *)tf->tf_a0,(char **)tf->tf_a1);
+			retval = sys_execv((char *)tf->tf_a0, (char **)tf->tf_a1, &err);
 			break;
 
 		case SYS__exit:
@@ -174,7 +174,6 @@ syscall(struct trapframe *tf)
 			copyin((const_userptr_t) (tf->tf_sp + 16), &whence, sizeof(whence));
 			retval64 = sys_lseek((int)tf->tf_a0, (off_t)pos64, whence, &err);
 			tf->tf_v1 = 0;
-
 			break;
 
 		default:

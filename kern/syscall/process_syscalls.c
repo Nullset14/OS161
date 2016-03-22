@@ -13,6 +13,8 @@
 #include <kern/process_syscalls.h>
 #include <proc.h>
 #include <kern/file_syscalls.h>
+#include <vnode.h>
+
 
 /* Spawning new process ids */
 pid_t
@@ -48,6 +50,7 @@ sys_fork(struct trapframe* tf, int *err) {
     struct trapframe* childtf = NULL;
     struct proc* childproc = NULL;
     struct addrspace* childaddr = NULL;
+
     int result;
 
     childtf = kmalloc(sizeof(struct trapframe));
@@ -79,15 +82,14 @@ sys_fork(struct trapframe* tf, int *err) {
     }
 
     result = childproc->pid;
+    childproc->p_cwd = curproc->p_cwd;
+    VOP_INCREF(curproc->p_cwd);
     curproc->p_numthreads++;
     return result;
 }
 
 void
 child_forkentry(void *data1, unsigned long data2){
-
-    //(void) data1;
-    //(void) data2;
 
     struct trapframe st_trapframe;
     struct trapframe* childtf = (struct trapframe*) data1;
@@ -108,24 +110,89 @@ child_forkentry(void *data1, unsigned long data2){
 };
 
 int
-sys_execv(char *progname, char **args) {
+sys_execv(char *progname, char **args, int *err) {
 
     struct addrspace *as;
     struct vnode *v;
     vaddr_t entrypoint, stackptr;
     int result;
 
-    (void)**args;
-
-    /* Open the file. */
-    result = vfs_open(progname, O_RDONLY, 0, &v);
-    if (result) {
-        return result;
+    /* Validations */
+    if (progname == NULL) {
+        *err = EFAULT;
+        return -1;
     }
 
+    /* Copy File name */
+    char *progname_copy = (char *) kmalloc(sizeof(char) * NAME_MAX);
+    size_t actual = 0;
+    result = copyinstr((userptr_t)progname, progname_copy, NAME_MAX, &actual);
+
+    if (result) {
+        *err = result;
+        return -1;
+    }
+
+    if (args == NULL || (int *)args == (int *)0x40000000 || (int *)args == (int *)0x80000000) {
+        *err = EFAULT;
+        return -1;
+    }
+
+    /* Count number of arguments and total size of input */
+    int args_count = 0;
+    for (;args_count < ARG_MAX && args[args_count] != NULL; args_count++);
+
+    if (args_count > ARG_MAX) {
+        *err = E2BIG;
+        return -1;
+    }
+
+    if (strlen(progname_copy) == 0) {
+        *err = EINVAL;
+        return -1;
+    }
+
+    /* Allocate Kernel Memory for arguments */
+    char **args_copy = (char **) kmalloc(sizeof(char *) * args_count);
+
+    int c_args_count = 0,
+            arg_size = 0,
+            padded_size = 0;
+
+    for (;c_args_count < args_count; c_args_count++) {
+        if ((int *)args[c_args_count] == (int *)0x40000000 || (int *)args[c_args_count] == (int *)0x80000000) {
+            *err = EFAULT;
+            return -1;
+        }
+    }
+
+    c_args_count = 0;
+    /* Calculate total length accounting for padding */
+    for (;c_args_count < args_count; c_args_count++) {
+        arg_size = strlen(args[c_args_count]) + 1;
+
+        args_copy[c_args_count] = (char *) kmalloc(sizeof(char) * arg_size);
+        copyinstr((userptr_t)args[c_args_count], args_copy[c_args_count], arg_size, &actual);
+
+        padded_size += arg_size;
+        if (padded_size % 4) {
+            padded_size += (4 - (padded_size % 4)) % 4;
+        }
+    }
+
+    /* Open the file. */
+    result = vfs_open(progname_copy, O_RDONLY, 0, &v);
+    if (result) {
+        kfree(progname_copy);
+        *err = result;
+        return -1;
+    }
+
+    /* Destroy the current process's address space to create a new one. */
+    as = curproc->p_addrspace;
     curproc->p_addrspace = NULL;
 
-    as_destroy(curproc->p_addrspace);
+    as_destroy(as);
 
     /* We should be a new process. */
     KASSERT(proc_getas() == NULL);
@@ -133,8 +200,10 @@ sys_execv(char *progname, char **args) {
     /* Create a new address space. */
     as = as_create();
     if (as == NULL) {
+        kfree(progname_copy);
         vfs_close(v);
-        return ENOMEM;
+        *err = ENOMEM;
+        return -1;
     }
 
     /* Switch to it and activate it. */
@@ -145,8 +214,10 @@ sys_execv(char *progname, char **args) {
     result = load_elf(v, &entrypoint);
     if (result) {
         /* p_addrspace will go away when curproc is destroyed */
+        kfree(progname_copy);
         vfs_close(v);
-        return result;
+        *err = result;
+        return -1;
     }
 
     /* Done with the file now. */
@@ -156,29 +227,66 @@ sys_execv(char *progname, char **args) {
     result = as_define_stack(as, &stackptr);
     if (result) {
         /* p_addrspace will go away when curproc is destroyed */
-        return result;
+        kfree(progname_copy);
+        *err = result;
+        return -1;
     }
 
-    /* Initialize standard IO */
-    std_io_init();
+    stackptr -= padded_size;
+    char **arg_address = (char **) kmalloc(sizeof(char *) * args_count + 1);
+
+    /* Copy arguments into user stack */
+    for(int i = 0; i < args_count; i++) {
+        arg_size = strlen(args_copy[i]) + 1;
+
+        if (arg_size % 4) {
+            arg_size += (4 - arg_size % 4) % 4;
+        }
+
+        /* Store address of arguments */
+        arg_address[i] = (char *)stackptr;
+
+        copyoutstr(args_copy[i], (userptr_t)stackptr, arg_size, &actual);
+        stackptr += arg_size;
+    }
+
+    /* Add Null Pointer at the end */
+    arg_address[args_count] = 0;
+
+    stackptr -= padded_size;
+    stackptr -= (args_count + 1) * sizeof(char *);
+
+    /* Copy address locations into user stack*/
+    for (int i = 0; i < args_count + 1; i++) {
+        copyout((arg_address + i), (userptr_t)stackptr, sizeof(char *));
+        stackptr += sizeof(char *);
+    }
+
+    /* Reset pointer to start of the stack */
+    stackptr -= ((args_count + 1) * sizeof(char *));
+
+    kfree(progname_copy);
+    kfree(args_copy);
+    kfree(arg_address);
 
     /* Warp to user mode. */
-    enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
-                      NULL /*userspace addr of environment*/,
-                      stackptr, entrypoint);
+    enter_new_process(args_count /*argc*/, (userptr_t) stackptr /*userspace addr of argv*/,
+                      (userptr_t) stackptr /*userspace addr of environment*/, stackptr, entrypoint);
 
     /* enter_new_process does not return. */
     panic("enter_new_process returned\n");
-    return EINVAL;
+
+    *err = EINVAL;
+    return -1;
 }
 
 pid_t
 sys_waitpid(pid_t pid, int *status, int options, int *err) {
 
     if(status == (int*) 0x0) {
-        *err = EFAULT;
-        return -1;
+        return 0;
     }
+
     if(status == (int*) 0x40000000 || status == (int*) 0x80000000 || ((int)status & 3) != 0) {
         *err = EFAULT;
         return -1;
@@ -207,6 +315,7 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
     lock_acquire(proc_ids[pid]->exitlock);
 
     if (proc_ids[pid]->exit_flag == false) {
+
         if (options == WNOHANG) {
             lock_release(proc_ids[pid]->exitlock);
             return 0;
@@ -219,15 +328,6 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
     *status = proc_ids[pid]->exit_code;
 
     lock_release(proc_ids[pid]->exitlock);
-
-    for(int fd=3; fd<OPEN_MAX;fd++)
-    {
-        if(curproc->file_table[fd] != NULL){
-            sys_close(fd, err);
-            curproc->file_table[fd] = NULL;
-        }
-    }
-
     lock_destroy(proc_ids[pid]->exitlock);
     cv_destroy(proc_ids[pid]->exitcv);
     kfree(proc_ids[pid]);
@@ -241,24 +341,12 @@ void sys_exit(int exitcode){
     lock_acquire(curproc->exitlock);
 
     curproc->exit_flag = true;
-
-    int err = 0;
+    curproc->exit_code = _MKWAIT_EXIT(exitcode);
 
     if(proc_ids[curproc->ppid]->exit_flag == false) {
-        curproc->exit_code = _MKWAIT_EXIT(exitcode);
-
-        for(int fd=3;fd<OPEN_MAX;fd++)
-        {
-            if(curproc->file_table[fd] != NULL){
-               sys_close(fd, &err);
-                curproc->file_table[fd] = NULL;
-            }
-        }
-
         cv_signal(curproc->exitcv, curproc->exitlock);
         lock_release(curproc->exitlock);
     }
-
     else {
         cv_destroy(curproc->exitcv);
         kfree(proc_ids[curproc->pid]);

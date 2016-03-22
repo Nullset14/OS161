@@ -153,15 +153,6 @@ common_prog(int nargs, char **args)
 	int error;
 
 	sys_waitpid(proc->pid, &status, 0, &error);
-/*	for (int i = PID_MIN; i < PID_MAX_256; i++) {
-		if (proc_ids[i] != NULL && proc_ids[i]->ppid == curproc->pid) {
-			lock_acquire(proc_ids[i]->exitlock);
-			cv_wait(proc_ids[i]->exitcv, proc_ids[i]->exitlock);
-			cv_signal(proc_ids[i]->exitcv, proc_ids[i]->exitlock);
-			lock_release(proc_ids[i]->exitlock);
-			break;
-		}
-	}*/
 
 	return 0;
 }

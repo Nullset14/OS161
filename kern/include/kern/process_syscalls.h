@@ -6,7 +6,7 @@ pid_t spawn_pid(int *);
 
 pid_t sys_getpid(void);
 
-int sys_execv(char *, char **);
+int sys_execv(char *, char **, int *);
 
 int sys_fork(struct trapframe *, int *);
 
