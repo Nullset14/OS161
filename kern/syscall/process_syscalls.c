@@ -336,12 +336,17 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
     return pid;
 }
 
-void sys_exit(int exitcode){
+void sys_exit(int exitcode, bool is_sig){
 
     lock_acquire(curproc->exitlock);
 
     curproc->exit_flag = true;
-    curproc->exit_code = _MKWAIT_EXIT(exitcode);
+
+    if (is_sig) {
+        curproc->exit_code = _MKWAIT_SIG(exitcode);
+    } else {
+        curproc->exit_code = _MKWAIT_EXIT(exitcode);
+    }
 
     if(proc_ids[curproc->ppid]->exit_flag == false) {
         cv_signal(curproc->exitcv, curproc->exitlock);

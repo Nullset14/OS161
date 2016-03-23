@@ -98,11 +98,11 @@ cmd_progthread(void *ptr, unsigned long nargs)
 		kprintf("Running program %s failed: %s\n", args[0],
 			strerror(result));
 
-		sys_exit(result);
+		sys_exit(result, false);
 		return;
 	}
 
-	sys_exit(result);
+	sys_exit(result, false);
 
 
 	/* NOTREACHED: runprogram only returns on error. */

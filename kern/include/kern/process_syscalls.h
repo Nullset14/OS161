@@ -14,6 +14,6 @@ void child_forkentry(void *, unsigned long);
 
 pid_t sys_waitpid(pid_t, int *, int, int *);
 
-void sys_exit(int);
+void sys_exit(int, bool);
 
 #endif //SRC_PROC_SYSCALL_H
