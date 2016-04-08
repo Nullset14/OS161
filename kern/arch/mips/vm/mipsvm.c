@@ -55,11 +55,6 @@
  * it's cutting (there are many) and why, and more importantly, how.
  */
 
-/*
- * Wrap ram_stealmem in a spinlock.
- */
-static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
-
 void
 vm_bootstrap(void)
 {
@@ -84,14 +79,34 @@ static
 paddr_t
 getppages(unsigned long npages)
 {
-	(void) npages;
-	paddr_t addr;
-	spinlock_acquire(&stealmem_lock);
+	unsigned long count = 0, page_counter = ram_getsize() / PAGE_SIZE, i;
 
-	addr = ram_stealmem(npages);
+	for(i = coremap_addr/PAGE_SIZE; i < page_counter && count != npages; i++) {
+		if(coremap[i].state == FREE) {
+			count++;
+		} else {
+			count = 0;
+		}
+	}
 
-	spinlock_release(&stealmem_lock);
-	return addr;
+	if (count < npages) {
+		return 0;
+	} else {
+		i--;
+	}
+
+	while(count > 0) {
+		coremap[i].state = FIXED;
+
+		if (count == 1) {
+			coremap[i].chunk_size = npages;
+			break;
+		}
+		i--;
+		count--;
+	}
+
+	return i * PAGE_SIZE;
 }
 
 /* Allocate/free some kernel-space virtual pages */
@@ -110,19 +125,29 @@ alloc_kpages(unsigned npages)
 void
 free_kpages(vaddr_t addr)
 {
-	/* nothing - leak the memory. */
+	int index = (addr - MIPS_KSEG0) / PAGE_SIZE;
+	int pages = coremap[index].chunk_size;
 
-	(void)addr;
+	coremap[index].chunk_size = 0;
+
+	for (int i = 0; i < pages; i++) {
+		coremap[index + i].state = FREE;
+	}
+
 }
 
 unsigned
 int
 coremap_used_bytes() {
 
-	/* dumbvm doesn't track page allocations. Return 0 so that khu works. */
-	//TODO
+	int count = 0;
+	for (unsigned int i = 0 ; i < ram_getsize() / PAGE_SIZE; i++) {
+		if (coremap[i].state == FIXED) {
+			count++;
+		}
+	}
 
-	return 0;
+	return count * PAGE_SIZE;
 }
 
 void

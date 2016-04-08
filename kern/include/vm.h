@@ -30,12 +30,26 @@
 #ifndef _VM_H_
 #define _VM_H_
 
+#include <spinlock.h>
+
 /*
  * VM system-related definitions.
  *
  * You'll probably want to add stuff here.
  */
 
+/* CoreMap Start Physical Address */
+paddr_t coremap_addr;
+
+/* CoreMap DataStructure */
+struct
+coremap_entry {
+    enum states { FREE, DIRTY, FIXED, CLEAN } state;
+    int chunk_size;
+};
+
+/* CoreMap Array Pointer */
+struct coremap_entry *coremap;
 
 #include <machine/vm.h>
 
@@ -46,6 +60,8 @@
 
 
 /* Initialization function */
+
+void coremap_bootstrap(void);
 void vm_bootstrap(void);
 
 /* Fault handling function called by trap code */

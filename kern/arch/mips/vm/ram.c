@@ -151,3 +151,30 @@ ram_getfirstfree(void)
 	firstpaddr = lastpaddr = 0;
 	return ret;
 }
+
+/* Initialize CoreMap Structure and Pages */
+void
+coremap_bootstrap(void)
+{
+	int total_pages = lastpaddr / PAGE_SIZE;
+	int pages = sizeof(struct coremap_entry) * total_pages/PAGE_SIZE;
+	if ((sizeof(struct coremap_entry) * total_pages) % PAGE_SIZE > 0) {
+		pages++;
+	}
+
+	coremap_addr = ram_stealmem(pages);
+	coremap = (void*) PADDR_TO_KVADDR(coremap_addr);
+
+	int allocated_pages = firstpaddr / PAGE_SIZE;
+
+	for(int i = 0; i < allocated_pages; i++) {
+		coremap[i].state = FIXED;
+	}
+
+	int free_pages = total_pages - allocated_pages;
+
+	for(int i = allocated_pages; i < free_pages; i++) {
+		coremap[i].state = FREE;
+		coremap[i].chunk_size = 0;
+	}
+}
