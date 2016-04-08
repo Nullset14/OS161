@@ -38,6 +38,7 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <synch.h>
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -59,6 +60,8 @@ void
 vm_bootstrap(void)
 {
 	/* Do nothing. */
+	booted = true;
+	mem_lock = lock_create("mem_lock");
 }
 
 /*
@@ -81,6 +84,10 @@ getppages(unsigned long npages)
 {
 	unsigned long count = 0, page_counter = ram_getsize() / PAGE_SIZE, i;
 
+	if (booted) {
+		lock_acquire(mem_lock);
+	}
+
 	for(i = coremap_addr/PAGE_SIZE; i < page_counter && count != npages; i++) {
 		if(coremap[i].state == FREE) {
 			count++;
@@ -90,6 +97,7 @@ getppages(unsigned long npages)
 	}
 
 	if (count < npages) {
+		lock_release(mem_lock);
 		return 0;
 	} else {
 		i--;
@@ -104,6 +112,10 @@ getppages(unsigned long npages)
 		}
 		i--;
 		count--;
+	}
+
+	if (booted) {
+		lock_release(mem_lock);
 	}
 
 	return i * PAGE_SIZE;
@@ -126,6 +138,11 @@ void
 free_kpages(vaddr_t addr)
 {
 	int index = (addr - MIPS_KSEG0) / PAGE_SIZE;
+
+	if (booted) {
+		lock_acquire(mem_lock);
+	}
+
 	int pages = coremap[index].chunk_size;
 
 	coremap[index].chunk_size = 0;
@@ -134,6 +151,9 @@ free_kpages(vaddr_t addr)
 		coremap[index + i].state = FREE;
 	}
 
+	if (booted) {
+		lock_release(mem_lock);
+	}
 }
 
 unsigned
@@ -141,10 +161,19 @@ int
 coremap_used_bytes() {
 
 	int count = 0;
+
+	if (booted) {
+		lock_acquire(mem_lock);
+	}
+
 	for (unsigned int i = 0 ; i < ram_getsize() / PAGE_SIZE; i++) {
 		if (coremap[i].state == FIXED) {
 			count++;
 		}
+	}
+
+	if (booted) {
+		lock_release(mem_lock);
 	}
 
 	return count * PAGE_SIZE;

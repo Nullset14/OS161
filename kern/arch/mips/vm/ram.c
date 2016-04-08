@@ -177,4 +177,6 @@ coremap_bootstrap(void)
 		coremap[i].state = FREE;
 		coremap[i].chunk_size = 0;
 	}
+
+	booted = false;
 }
