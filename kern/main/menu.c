@@ -126,6 +126,7 @@ common_prog(int nargs, char **args)
 {
 	struct proc *proc;
 	int result;
+	unsigned tc;
 
 	/* Create a process for the new program to run in. */
 	proc = proc_create_runprogram(args[0] /* name */);
@@ -134,6 +135,8 @@ common_prog(int nargs, char **args)
 	}
 
 	proc->ppid = curproc->pid;
+
+	tc = thread_count;
 
 	result = thread_fork(args[0] /* thread name */,
 			proc /* new process */,
@@ -153,6 +156,10 @@ common_prog(int nargs, char **args)
 	int error;
 
 	sys_waitpid(proc->pid, &status, 0, &error);
+
+	// Wait for all threads to finish cleanup, otherwise khu be a bit behind,
+	// especially once swapping is enabled.
+	thread_wait_for_count(tc);
 
 	return 0;
 }

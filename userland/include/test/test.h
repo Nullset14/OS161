@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2001, 2002, 2003, 2004, 2005, 2008, 2009
+ * Copyright (c) 2016
  *	The President and Fellows of Harvard College.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,65 +28,54 @@
  */
 
 /*
- * huge.c
+ * Use these instead of just calling tprintf so we know each printout
+ * is atomic; this prevents the lines from getting intermingled.
  *
- * 	Tests the VM system by accessing a large array (sparse) that
- *	cannot fit into memory.
- *
- * When the VM system assignment is done, your system should be able
- * to run this successfully.
+ * tsay is quiet during automated testing
+ * nsay is noisy during automated testing
  */
+#ifndef _TEST_TEST_H_
+#define _TEST_TEST_H_
 
+#include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <test161/test161.h>
 
-#define PageSize	4096
-#define NumPages	512
-
-int sparse[NumPages][PageSize];	/* use only the first element in the row */
-
-int
-main(void)
+static
+inline
+void
+tsay(const char *fmt, ...)
 {
-	int i,j;
-
-	tprintf("Entering the huge program - I will stress test your VM\n");
-
-	/* move number in so that sparse[i][0]=i */
-	for (i=0; i<NumPages; i++) {
-		TEST161_TPROGRESS(i);
-		sparse[i][0]=i;
-	}
-
-	tprintf("stage [1] done\n");
-	nprintf("\n");
-
-	/* increment each location 5 times */
-	for (j=0; j<5; j++) {
-		for (i=0; i<NumPages; i++) {
-			TEST161_TPROGRESS(i);
-			sparse[i][0]++;
-		}
-		tprintf("stage [2.%d] done\n", j);
-		nprintf("\n");
-	}
-
-	tprintf("stage [2] done\n");
-
-	/* check if the numbers are sane */
-	for (i=NumPages-1; i>=0; i--) {
-		TEST161_TPROGRESS(i);
-		if (sparse[i][0]!=i+5) {
-			tprintf("BAD NEWS!!! - your VM mechanism has a bug!\n");
-			success(TEST161_FAIL, SECRET, "/testbin/huge");
-			exit(1);
-		}
-	}
-
-	nprintf("\n");
-	success(TEST161_SUCCESS, SECRET, "/testbin/huge");
-
-	return 0;
+#ifdef SECRET_TESTING
+	(void)fmt;
+#else
+	char buf[256];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	write(STDOUT_FILENO, buf, strlen(buf));
+#endif
 }
 
+static
+inline
+void
+nsay(const char *fmt, ...)
+{
+#ifndef SECRET_TESTING
+	(void)fmt;
+#else
+	char buf[256];
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ap);
+	va_end(ap);
+	write(STDOUT_FILENO, buf, strlen(buf));
+#endif
+}
+
+#endif /* _TEST_TEST_H_ */
