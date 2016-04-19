@@ -161,6 +161,10 @@ common_prog(int nargs, char **args)
 	// especially once swapping is enabled.
 	thread_wait_for_count(tc);
 
+	// Wait for all threads to finish cleanup, otherwise khu be a bit behind,
+	// especially once swapping is enabled.
+	thread_wait_for_count(tc);
+
 	return 0;
 }
 
