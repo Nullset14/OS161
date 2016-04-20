@@ -123,16 +123,6 @@ sys_execv(char *progname, char **args, int *err) {
         return -1;
     }
 
-    /* Copy File name */
-    char *progname_copy = (char *) kmalloc(sizeof(char) * NAME_MAX);
-    size_t actual = 0;
-    result = copyinstr((userptr_t)progname, progname_copy, NAME_MAX, &actual);
-
-    if (result) {
-        *err = result;
-        return -1;
-    }
-
     if (args == NULL || (int *)args == (int *)0x40000000 || (int *)args == (int *)0x80000000) {
         *err = EFAULT;
         return -1;
@@ -147,7 +137,19 @@ sys_execv(char *progname, char **args, int *err) {
         return -1;
     }
 
+    /* Copy File name */
+    char *progname_copy = (char *) kmalloc(sizeof(char) * NAME_MAX);
+    size_t actual = 0;
+    result = copyinstr((userptr_t)progname, progname_copy, NAME_MAX, &actual);
+
+    if (result) {
+        kfree(progname_copy);
+        *err = result;
+        return -1;
+    }
+
     if (strlen(progname_copy) == 0) {
+        kfree(progname_copy);
         *err = EINVAL;
         return -1;
     }
@@ -161,6 +163,7 @@ sys_execv(char *progname, char **args, int *err) {
 
     for (;c_args_count < args_count; c_args_count++) {
         if ((int *)args[c_args_count] == (int *)0x40000000 || (int *)args[c_args_count] == (int *)0x80000000) {
+            kfree(progname_copy);
             *err = EFAULT;
             return -1;
         }
@@ -266,6 +269,17 @@ sys_execv(char *progname, char **args, int *err) {
     stackptr -= ((args_count + 1) * sizeof(char *));
 
     kfree(progname_copy);
+
+    c_args_count = 0;
+    for (;c_args_count < args_count; c_args_count++) {
+        kfree(args_copy[c_args_count]);
+    }
+
+    c_args_count = 0;
+    for (;c_args_count < args_count; c_args_count++) {
+        kfree(arg_address[c_args_count]);
+    }
+
     kfree(args_copy);
     kfree(arg_address);
 
@@ -354,7 +368,7 @@ void sys_exit(int exitcode, bool is_sig){
     }
     else {
         cv_destroy(curproc->exitcv);
-        kfree(proc_ids[curproc->pid]);
+        proc_destroy(proc_ids[curproc->pid]);
         proc_ids[curproc->pid] = NULL;
         lock_destroy(curproc->exitlock);
     }

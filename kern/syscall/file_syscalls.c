@@ -56,7 +56,6 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         /* Claim a file descriptor */
         curproc->file_table[fd] = kmalloc(sizeof(struct file_handle));
         if (curproc->file_table[fd] == NULL) {
-            kfree(curproc->file_table[fd]);
             kfree(filename_copy);
             curproc->file_table[fd] = NULL;
             *err = ENOMEM;
@@ -64,7 +63,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         }
 
         curproc->file_table[fd]->fh_lock = lock_create("fd_lock");
-        if (curproc->file_table[fd] == NULL) {
+        if (curproc->file_table[fd]->fh_lock == NULL) {
             kfree(curproc->file_table[fd]);
             kfree(filename_copy);
             curproc->file_table[fd] = NULL;
@@ -79,7 +78,7 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         response = vfs_open(filename_copy, flags, mode, &(curproc->file_table[fd]->fh_vnode));
 
         if (response) {
-            kfree(curproc->file_table[fd]->fh_lock);
+            lock_destroy(curproc->file_table[fd]->fh_lock);
             kfree(curproc->file_table[fd]);
             kfree(filename_copy);
             curproc->file_table[fd] = NULL;
@@ -90,12 +89,13 @@ sys_open(char *filename, int flags, mode_t mode, int *err)
         break;
     }
 
+    kfree(filename_copy);
+
     if (fd >= OPEN_MAX) {
         *err = EMFILE;
         return -1;
     }
 
-    kfree(filename_copy);
     return fd;
 }
 
@@ -270,7 +270,6 @@ int sys_close(int fd, int *err) {
         kfree(curproc->file_table[fd]);
 
         curproc->file_table[fd] = NULL;
-        //kfree(curproc->file_table[fd]);
 
         return 0;
     }
