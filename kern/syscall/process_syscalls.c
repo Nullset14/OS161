@@ -70,6 +70,7 @@ sys_fork(struct trapframe* tf, int *err) {
 
     childproc = proc_create_child("child");
     if(childproc == NULL){
+        kfree(childtf);
         *err = ENOMEM;
         return -1;
     }
@@ -275,11 +276,6 @@ sys_execv(char *progname, char **args, int *err) {
         kfree(args_copy[c_args_count]);
     }
 
-    c_args_count = 0;
-    for (;c_args_count < args_count; c_args_count++) {
-        kfree(arg_address[c_args_count]);
-    }
-
     kfree(args_copy);
     kfree(arg_address);
 
@@ -344,6 +340,7 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
     lock_release(proc_ids[pid]->exitlock);
     lock_destroy(proc_ids[pid]->exitlock);
     cv_destroy(proc_ids[pid]->exitcv);
+    as_destroy(proc_ids[pid]->p_addrspace);
     kfree(proc_ids[pid]);
     proc_ids[pid] = NULL;
 
@@ -362,13 +359,13 @@ void sys_exit(int exitcode, bool is_sig){
         curproc->exit_code = _MKWAIT_EXIT(exitcode);
     }
 
-    if(proc_ids[curproc->ppid]->exit_flag == false) {
-        cv_signal(curproc->exitcv, curproc->exitlock);
+    if (proc_ids[curproc->ppid]->exit_flag == false) {
+        cv_broadcast(curproc->exitcv, curproc->exitlock);
         lock_release(curproc->exitlock);
-    }
-    else {
+    } else {
         cv_destroy(curproc->exitcv);
-        proc_destroy(proc_ids[curproc->pid]);
+        as_destroy(curproc->p_addrspace);
+        kfree(proc_ids[curproc->pid]);
         proc_ids[curproc->pid] = NULL;
         lock_destroy(curproc->exitlock);
     }
