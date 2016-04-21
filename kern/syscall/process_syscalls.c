@@ -372,3 +372,61 @@ void sys_exit(int exitcode, bool is_sig){
 
     thread_exit();
 }
+
+void *
+sys_sbrk(intptr_t amount,  int *err){
+
+    lock_acquire(curproc->exitlock);
+
+    vaddr_t retval = curproc->p_addrspace->heap_end;
+
+    if(curproc->p_addrspace->heap_end + (vaddr_t) amount < curproc->p_addrspace->heap_start) {
+        *err = EINVAL;
+        lock_release(curproc->exitlock);
+        return (void *)-1;
+    }
+
+    vaddr_t v_amount = (vaddr_t) amount;
+
+    /* Align the region. First, the base... */
+    size_t sz = 0;
+    sz += v_amount  & ~(vaddr_t)PAGE_FRAME;
+    v_amount &= PAGE_FRAME;
+
+    /* ...and now the length. */
+    sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
+
+    int num_pages = sz /PAGE_SIZE;
+    vaddr_t heap_end_vaddr = curproc->p_addrspace->heap_end;
+
+    for(int i = 0; i < num_pages; i++){
+
+        struct page_table* running_table = curproc->p_addrspace->page_table_entry;
+        struct page_table* previous_table;
+        vaddr_t previous_vpn = 0;
+
+        while(running_table != NULL){
+            previous_table = running_table;
+            previous_vpn = running_table->vpn;
+            running_table = running_table->next;
+        }
+
+        running_table = kmalloc(sizeof(struct page_table));
+        if(heap_end_vaddr == curproc->p_addrspace->heap_start){
+            running_table->vpn = heap_end_vaddr + (i * PAGE_SIZE);
+        }else {
+            running_table->vpn = previous_vpn + (i * PAGE_SIZE);
+        }
+
+        running_table->ppn = 0;
+        running_table->next = NULL;
+
+        if(previous_table != NULL){
+            previous_table->next = running_table;
+        }
+    }
+
+    curproc->p_addrspace->heap_end += v_amount;
+    lock_release(curproc->exitlock);
+    return (void *)retval;
+}
