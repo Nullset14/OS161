@@ -16,4 +16,6 @@ pid_t sys_waitpid(pid_t, int *, int, int *);
 
 void sys_exit(int, bool);
 
+void *sys_sbrk(intptr_t, int *);
+
 #endif //SRC_PROC_SYSCALL_H

@@ -8,7 +8,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
+*    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
@@ -36,8 +36,8 @@
 #include <proc.h>
 #include <current.h>
 #include <mips/tlb.h>
-#include <addrspace.h>
 #include <vm.h>
+#include <addrspace.h>
 #include <synch.h>
 
 /*
@@ -196,7 +196,6 @@ int
 vm_fault(int faulttype, vaddr_t faultaddress)
 {
 	paddr_t paddr;
-	//int i;
 	uint32_t ehi, elo;
 	struct addrspace *as;
 	int spl;
@@ -256,6 +255,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 					as->page_table_entry = temp;
 				} else {
 					last_page->next = temp;
+					last_page = last_page->next;
 				}
 			}
 
@@ -291,7 +291,8 @@ as_create(void)
 	}
 
 	as->addr_regions = NULL;
-	//as->heap_start = 0;
+	as->heap_start = 0;
+	as->heap_end = 0;
 	//as->heap_size = 0;
 	as->page_table_entry = NULL;
 
@@ -315,7 +316,9 @@ as_destroy(struct addrspace *as) {
 
 	while (temp != NULL) {
 		page_temp = temp->next;
-		free_kpages(temp->vpn);
+		coremap[temp->ppn/PAGE_SIZE].chunk_size=0;
+		coremap[temp->ppn/PAGE_SIZE].state=FREE;
+
 		kfree(temp);
 		temp = page_temp;
 	}
@@ -347,12 +350,12 @@ as_activate(void)
 void
 as_deactivate(void)
 {
-	/* nothing */
+
 }
 
 int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
-				 int readable, int writeable, int executable)
+		 int readable, int writeable, int executable)
 {
 	//size_t npages;
 
@@ -380,17 +383,21 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	address_temp = (struct region *) kmalloc(sizeof(struct region));
 	address_temp->region_start = vaddr;
 	address_temp->region_size = sz;
+	address_temp->next = NULL;
 	//address_temp->permission = (readable + writeable + executable);
 
 	if (address_last == NULL) {
 		as->addr_regions = address_temp;
 	} else {
 		address_last->next = address_temp;
+		address_last = address_last->next;
 	}
 	as->heap_start = address_temp->region_start + address_temp->region_size;
+	as->heap_end = as->heap_start;
 
 	return 0;
 }
+
 
 /*
 static
@@ -413,8 +420,7 @@ as_prepare_load(struct addrspace *as)
 int
 as_complete_load(struct addrspace *as)
 {
-	(void)as;
-	//panic("as_complete_load");
+	(void) as;
 	return 0;
 }
 
@@ -429,7 +435,84 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 int
 as_copy(struct addrspace *old, struct addrspace **ret)
 {
-	(void) old, (void) ret;
-	//panic("as_copy");
+	struct addrspace *target;
+
+	target = as_create();
+	if(target == NULL){
+		return ENOMEM;
+	}
+
+	target->page_table_entry = NULL;
+
+	struct page_table *new_pg_table;
+	struct page_table *old_pg_table = old->page_table_entry;
+	struct page_table *page_table_last = NULL;
+
+	while (old_pg_table != NULL) {
+		new_pg_table = kmalloc(sizeof(struct page_table));
+
+		if(new_pg_table == NULL){
+			return ENOMEM;
+		}
+
+		new_pg_table->vpn = old_pg_table->vpn;
+		new_pg_table->ppn = getppages(1);
+
+		if (new_pg_table->ppn == 0) {
+			return ENOMEM;
+		}
+
+		memmove((void *) PADDR_TO_KVADDR(new_pg_table->ppn), (const void *) PADDR_TO_KVADDR(old_pg_table->ppn), PAGE_SIZE);
+
+		new_pg_table->next = NULL;
+		old_pg_table = old_pg_table->next;
+
+		if (page_table_last == NULL) {
+			page_table_last = new_pg_table;
+		} else {
+			page_table_last->next = new_pg_table;
+			page_table_last = page_table_last->next;
+		}
+
+		if (target->page_table_entry == NULL) {
+			target->page_table_entry = new_pg_table;
+		}
+	}
+
+	target->addr_regions = NULL;
+
+	struct region *new_region;
+	struct region *old_region = old->addr_regions;
+	struct region *region_last = NULL;
+
+	while(old_region != NULL) {
+		new_region = kmalloc(sizeof(struct region));
+
+		if(new_region == NULL){
+			return ENOMEM;
+		}
+
+		new_region->region_start = old_region->region_start;
+		new_region->region_size = old_region->region_size;
+
+		new_region->next = NULL;
+		old_region = old_region->next;
+
+		if (region_last == NULL) {
+			region_last = new_region;
+		} else {
+			region_last->next = new_region;
+			region_last = region_last->next;
+		}
+
+		if (target->addr_regions == NULL) {
+			target->addr_regions = new_region;
+		}
+	}
+
+	target->heap_start = old->heap_start;
+	target->heap_end = old->heap_end;
+
+	*ret = target;
 	return 0;
 }
