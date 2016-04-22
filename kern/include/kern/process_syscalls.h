@@ -2,7 +2,7 @@
 #define SRC_PROC_SYSCALL_H
 
 /* Process System Calls */
-pid_t spawn_pid(int *);
+pid_t spawn_pid(struct proc *, int *);
 
 pid_t sys_getpid(void);
 

@@ -234,8 +234,30 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		case VM_FAULT_READ:
 		case VM_FAULT_WRITE: {
 
+			/* Bad Call Checks */
+			if (faultaddress >= as->heap_end && faultaddress < USERSTACK - 1024 * PAGE_SIZE)
+				return EFAULT;
+
+			if (faultaddress >= USERSTACK)
+				return EFAULT;
+
+			if (faultaddress < as->heap_start) {
+				struct region *temp_region = as->addr_regions;
+
+				while (temp_region != NULL) {
+					if (faultaddress >= temp_region->region_start &&
+						faultaddress < temp_region->region_start + temp_region->region_size) {
+						break;
+					} else {
+						temp_region = temp_region->next;
+						if (temp_region == NULL)
+							return EFAULT;
+					}
+				}
+			}
+
 			while (temp != NULL) {
-				if ((temp->vpn >> 12) == (faultaddress >> 12)) {
+				if (faultaddress >= temp->vpn && faultaddress < temp->vpn + PAGE_SIZE) {
 					found = true;
 					break;
 				}
@@ -266,7 +288,6 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	}
 
 	paddr = temp->ppn;
-	//paddr = ((temp->ppn << 12) | (faultaddress & ((1 << 13) - 1)));
 	/* make sure it's page-aligned */
 	KASSERT((paddr & PAGE_FRAME) == paddr);
 
@@ -293,7 +314,6 @@ as_create(void)
 	as->addr_regions = NULL;
 	as->heap_start = 0;
 	as->heap_end = 0;
-	//as->heap_size = 0;
 	as->page_table_entry = NULL;
 
 	return as;
@@ -313,11 +333,13 @@ as_destroy(struct addrspace *as) {
 
 	struct page_table *temp = as->page_table_entry;
 	struct page_table *page_temp;
-
 	while (temp != NULL) {
 		page_temp = temp->next;
-		coremap[temp->ppn/PAGE_SIZE].chunk_size=0;
+
+		lock_acquire(mem_lock);
+		coremap[temp->ppn/PAGE_SIZE].chunk_size = 0;
 		coremap[temp->ppn/PAGE_SIZE].state=FREE;
+		lock_release(mem_lock);
 
 		kfree(temp);
 		temp = page_temp;
@@ -370,7 +392,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	/* ...and now the length. */
 	sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
 
-	//npages = sz / PAGE_SIZE;
+	int npages = sz / PAGE_SIZE;
 
 	struct region *address_temp = as->addr_regions;
 	struct region *address_last = NULL;
@@ -382,7 +404,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 
 	address_temp = (struct region *) kmalloc(sizeof(struct region));
 	address_temp->region_start = vaddr;
-	address_temp->region_size = sz;
+	address_temp->region_size = npages * PAGE_SIZE;
 	address_temp->next = NULL;
 	//address_temp->permission = (readable + writeable + executable);
 
@@ -392,6 +414,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		address_last->next = address_temp;
 		address_last = address_last->next;
 	}
+
 	as->heap_start = address_temp->region_start + address_temp->region_size;
 	as->heap_end = as->heap_start;
 
@@ -456,13 +479,14 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 		}
 
 		new_pg_table->vpn = old_pg_table->vpn;
-		new_pg_table->ppn = getppages(1);
+		new_pg_table->ppn = KVADDR_TO_PADDR((vaddr_t)kmalloc(PAGE_SIZE));
 
 		if (new_pg_table->ppn == 0) {
 			return ENOMEM;
 		}
 
-		memmove((void *) PADDR_TO_KVADDR(new_pg_table->ppn), (const void *) PADDR_TO_KVADDR(old_pg_table->ppn), PAGE_SIZE);
+		memmove((void *) PADDR_TO_KVADDR(new_pg_table->ppn),
+				(const void *) PADDR_TO_KVADDR(old_pg_table->ppn), PAGE_SIZE);
 
 		new_pg_table->next = NULL;
 		old_pg_table = old_pg_table->next;

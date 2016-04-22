@@ -14,11 +14,12 @@
 #include <proc.h>
 #include <kern/file_syscalls.h>
 #include <vnode.h>
+#include <addrspace.h>
 
 
 /* Spawning new process ids */
 pid_t
-spawn_pid(int *err) {
+spawn_pid(struct proc *proc, int *err) {
 
     int i = PID_MIN;
     while(proc_ids[i] != NULL && i < PID_MAX_256) {
@@ -26,9 +27,9 @@ spawn_pid(int *err) {
     }
 
     if (i < PID_MAX_256) {
-        proc_ids[i] = kmalloc(sizeof(struct proc));
+        proc_ids[i] = proc;
 
-        if(proc_ids[i] == NULL){
+        if(proc_ids[i] == NULL) {
             *err = ENOMEM;
             return -1;
         }
@@ -338,9 +339,13 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
     *status = proc_ids[pid]->exit_code;
 
     lock_release(proc_ids[pid]->exitlock);
+
+    /* Clean Up */
     lock_destroy(proc_ids[pid]->exitlock);
     cv_destroy(proc_ids[pid]->exitcv);
     as_destroy(proc_ids[pid]->p_addrspace);
+    proc_ids[pid]->p_addrspace = NULL;
+    kfree(proc_ids[pid]->p_name);
     kfree(proc_ids[pid]);
     proc_ids[pid] = NULL;
 
@@ -350,6 +355,11 @@ sys_waitpid(pid_t pid, int *status, int options, int *err) {
 void sys_exit(int exitcode, bool is_sig){
 
     lock_acquire(curproc->exitlock);
+
+    for (int fd = 0; fd < OPEN_MAX; fd++) {
+        int err;
+        sys_close(fd, &err);
+    }
 
     curproc->exit_flag = true;
 
@@ -363,8 +373,11 @@ void sys_exit(int exitcode, bool is_sig){
         cv_broadcast(curproc->exitcv, curproc->exitlock);
         lock_release(curproc->exitlock);
     } else {
+        /* Clean Up */
         cv_destroy(curproc->exitcv);
         as_destroy(curproc->p_addrspace);
+        kfree(proc_ids[curproc->pid]->p_name);
+        curproc->p_addrspace = NULL;
         kfree(proc_ids[curproc->pid]);
         proc_ids[curproc->pid] = NULL;
         lock_destroy(curproc->exitlock);
@@ -374,59 +387,31 @@ void sys_exit(int exitcode, bool is_sig){
 }
 
 void *
-sys_sbrk(intptr_t amount,  int *err){
-
-    lock_acquire(curproc->exitlock);
+sys_sbrk(intptr_t amount, int *err){
 
     vaddr_t retval = curproc->p_addrspace->heap_end;
 
-    if(curproc->p_addrspace->heap_end + (vaddr_t) amount < curproc->p_addrspace->heap_start) {
+    if (amount < 0 && amount <= -4096*1024*256) {
         *err = EINVAL;
-        lock_release(curproc->exitlock);
         return (void *)-1;
     }
 
-    vaddr_t v_amount = (vaddr_t) amount;
-
-    /* Align the region. First, the base... */
-    size_t sz = 0;
-    sz += v_amount  & ~(vaddr_t)PAGE_FRAME;
-    v_amount &= PAGE_FRAME;
-
-    /* ...and now the length. */
-    sz = (sz + PAGE_SIZE - 1) & PAGE_FRAME;
-
-    int num_pages = sz /PAGE_SIZE;
-    vaddr_t heap_end_vaddr = curproc->p_addrspace->heap_end;
-
-    for(int i = 0; i < num_pages; i++){
-
-        struct page_table* running_table = curproc->p_addrspace->page_table_entry;
-        struct page_table* previous_table;
-        vaddr_t previous_vpn = 0;
-
-        while(running_table != NULL){
-            previous_table = running_table;
-            previous_vpn = running_table->vpn;
-            running_table = running_table->next;
-        }
-
-        running_table = kmalloc(sizeof(struct page_table));
-        if(heap_end_vaddr == curproc->p_addrspace->heap_start){
-            running_table->vpn = heap_end_vaddr + (i * PAGE_SIZE);
-        }else {
-            running_table->vpn = previous_vpn + (i * PAGE_SIZE);
-        }
-
-        running_table->ppn = 0;
-        running_table->next = NULL;
-
-        if(previous_table != NULL){
-            previous_table->next = running_table;
-        }
+    if (curproc->p_addrspace->heap_end + amount < curproc->p_addrspace->heap_start)  {
+        *err = EINVAL;
+        return (void *)-1;
     }
 
-    curproc->p_addrspace->heap_end += v_amount;
-    lock_release(curproc->exitlock);
+    if (curproc->p_addrspace->heap_start + amount >= USERSTACK - 1024 * PAGE_SIZE)  {
+        *err = ENOMEM;
+        return (void *)-1;
+    }
+
+    /* Align in multiples of 4 */
+    if (amount % 4 != 0) {
+        amount = (amount + 4) - (amount % 4);
+    }
+
+    curproc->p_addrspace->heap_end += amount;
+
     return (void *)retval;
 }

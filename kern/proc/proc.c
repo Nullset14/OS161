@@ -91,7 +91,7 @@ proc_create(const char *name)
 	proc->p_cwd = NULL;
 
 	/* Assign PID */
-	proc->pid = spawn_pid(&err);
+	proc->pid = spawn_pid(proc, &err);
 
 	proc->ppid = -1;
 
