@@ -56,6 +56,13 @@
  * it's cutting (there are many) and why, and more importantly, how.
  */
 
+static
+void
+as_zero_region(paddr_t paddr, unsigned npages)
+{
+	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
+}
+
 void
 vm_bootstrap(void)
 {
@@ -269,7 +276,8 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 			if (!found) {
 				temp = (struct page_table *) kmalloc(sizeof(struct page_table));
 				temp->vpn = faultaddress;
-				temp->ppn = getppages(1);
+				temp->ppn = KVADDR_TO_PADDR((vaddr_t)kmalloc(PAGE_SIZE));
+				as_zero_region(temp->ppn, 1);
 				temp->next = NULL;
 				found = true;
 
@@ -421,17 +429,6 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 	return 0;
 }
 
-
-/*
-static
-void
-as_zero_region(paddr_t paddr, unsigned npages)
-{
-	(void) paddr, (void) npages;
-	bzero((void *)PADDR_TO_KVADDR(paddr), npages * PAGE_SIZE);
-}
-*/
-
 int
 as_prepare_load(struct addrspace *as)
 {
@@ -480,6 +477,7 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 
 		new_pg_table->vpn = old_pg_table->vpn;
 		new_pg_table->ppn = KVADDR_TO_PADDR((vaddr_t)kmalloc(PAGE_SIZE));
+		as_zero_region(new_pg_table->ppn, 1);
 
 		if (new_pg_table->ppn == 0) {
 			return ENOMEM;
