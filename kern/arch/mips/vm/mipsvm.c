@@ -56,7 +56,7 @@
  * it's cutting (there are many) and why, and more importantly, how.
  */
 
-struct lock *mem_lock = NULL;
+struct spinlock mem_lock = SPINLOCK_INITIALIZER;
 bool booted = false;
 
 static void
@@ -70,7 +70,6 @@ vm_bootstrap(void)
 {
 	/* Do nothing. */
 	booted = true;
-	mem_lock = lock_create("mem_lock");
 }
 
 /*
@@ -94,7 +93,7 @@ getppages(unsigned long npages)
 	unsigned long count = 0, page_counter = ram_getsize() / PAGE_SIZE, i;
 
 	if (booted) {
-		lock_acquire(mem_lock);
+		spinlock_acquire(&mem_lock);
 	}
 
 	for(i = coremap_addr/PAGE_SIZE; i < page_counter && count != npages; i++) {
@@ -108,7 +107,7 @@ getppages(unsigned long npages)
 	if (count < npages) {
 
 		if (booted) {
-			lock_release(mem_lock);
+			spinlock_release(&mem_lock);
 		}
 
 		return 0;
@@ -128,7 +127,7 @@ getppages(unsigned long npages)
 	}
 
 	if (booted) {
-		lock_release(mem_lock);
+		spinlock_release(&mem_lock);
 	}
 
 	return i * PAGE_SIZE;
@@ -153,7 +152,7 @@ free_kpages(vaddr_t addr)
 	int index = (addr - MIPS_KSEG0) / PAGE_SIZE;
 
 	if (booted) {
-		lock_acquire(mem_lock);
+		spinlock_acquire(&mem_lock);
 	}
 
 	int pages = coremap[index].chunk_size;
@@ -165,7 +164,7 @@ free_kpages(vaddr_t addr)
 	}
 
 	if (booted) {
-		lock_release(mem_lock);
+		spinlock_release(&mem_lock);
 	}
 }
 
@@ -176,7 +175,7 @@ coremap_used_bytes() {
 	int count = 0;
 
 	if (booted) {
-		lock_acquire(mem_lock);
+		spinlock_acquire(&mem_lock);
 	}
 
 	for (unsigned int i = 0 ; i < ram_getsize() / PAGE_SIZE; i++) {
@@ -186,7 +185,7 @@ coremap_used_bytes() {
 	}
 
 	if (booted) {
-		lock_release(mem_lock);
+		spinlock_release(&mem_lock);
 	}
 
 	return count * PAGE_SIZE;
@@ -359,10 +358,10 @@ as_destroy(struct addrspace *as) {
 	while (temp != NULL) {
 		page_temp = temp->next;
 
-		lock_acquire(mem_lock);
+		spinlock_acquire(&mem_lock);
 		coremap[temp->ppn/PAGE_SIZE].chunk_size = 0;
 		coremap[temp->ppn/PAGE_SIZE].state=FREE;
-		lock_release(mem_lock);
+		spinlock_release(&mem_lock);
 
 		kfree(temp);
 		temp = page_temp;

@@ -49,7 +49,6 @@ coremap_entry {
 };
 
 extern bool booted;
-extern struct lock *mem_lock;
 
 /* CoreMap Array Pointer */
 struct coremap_entry *coremap;
