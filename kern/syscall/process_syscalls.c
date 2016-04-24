@@ -374,6 +374,7 @@ void sys_exit(int exitcode, bool is_sig){
         lock_release(curproc->exitlock);
     } else {
         /* Clean Up */
+        lock_release(curproc->exitlock);
         cv_destroy(curproc->exitcv);
         as_destroy(curproc->p_addrspace);
         kfree(proc_ids[curproc->pid]->p_name);
@@ -401,7 +402,7 @@ sys_sbrk(intptr_t amount, int *err){
         return (void *)-1;
     }
 
-    if (curproc->p_addrspace->heap_start + amount >= USERSTACK - 1024 * PAGE_SIZE)  {
+    if (curproc->p_addrspace->heap_start + amount >= USERSTACK - 2048 * PAGE_SIZE)  {
         *err = ENOMEM;
         return (void *)-1;
     }

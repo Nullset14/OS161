@@ -48,8 +48,8 @@ coremap_entry {
     int chunk_size;
 };
 
-bool booted;
-struct lock *mem_lock;
+extern bool booted;
+extern struct lock *mem_lock;
 
 /* CoreMap Array Pointer */
 struct coremap_entry *coremap;

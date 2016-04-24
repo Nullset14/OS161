@@ -82,7 +82,6 @@ struct addrspace {
     struct region *addr_regions;
     vaddr_t heap_start;
     vaddr_t heap_end;
-    //struct region *heap;
     struct page_table *page_table_entry;
 #endif
 };
