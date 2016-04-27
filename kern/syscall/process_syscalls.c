@@ -15,6 +15,8 @@
 #include <kern/file_syscalls.h>
 #include <vnode.h>
 #include <addrspace.h>
+#include <mips/tlb.h>
+#include <spl.h>
 
 
 /* Spawning new process ids */
@@ -402,17 +404,69 @@ sys_sbrk(intptr_t amount, int *err){
         return (void *)-1;
     }
 
-    if (curproc->p_addrspace->heap_start + amount >= USERSTACK - 2048 * PAGE_SIZE)  {
+    if (curproc->p_addrspace->heap_start + amount >= USERSTACK - 1024 * PAGE_SIZE)  {
         *err = ENOMEM;
         return (void *)-1;
     }
 
     /* Align in multiples of 4 */
     if (amount % 4 != 0) {
-        amount = (amount + 4) - (amount % 4);
+        *err = EINVAL;
+        return (void *)-1;
+    }
+
+    int num_pages = (amount < 0) ? (amount * -1)/PAGE_SIZE : amount/PAGE_SIZE;
+
+    if (amount % PAGE_SIZE != 0)
+        num_pages++;
+
+    struct page_table *proc_pg_table = curproc->p_addrspace->page_table_entry;
+    struct page_table *prev_proc_pg_table;
+    struct page_table *free_proc_pg_table;
+
+    if(amount < 0) {
+        for (int i = 1; i <= num_pages; i++) {
+
+            // Page Table removal loop through the page table and remove entries correspondingly.
+
+            proc_pg_table = curproc->p_addrspace->page_table_entry;
+            prev_proc_pg_table = proc_pg_table;
+
+            while(proc_pg_table != NULL) {
+                if (proc_pg_table->vpn < USERSTACK - 1024 * PAGE_SIZE &&
+                    proc_pg_table->vpn >= (curproc->p_addrspace->heap_end + amount)) {
+
+                    prev_proc_pg_table->next = proc_pg_table->next;
+
+                    free_proc_pg_table = proc_pg_table;
+                    kfree((void *)PADDR_TO_KVADDR(free_proc_pg_table->ppn));
+                    kfree(free_proc_pg_table);
+
+                    break;
+                }
+
+                prev_proc_pg_table = proc_pg_table;
+                proc_pg_table = proc_pg_table->next;
+            }
+
+        }
+
+        // TLB cleanup code
+        int spl;
+
+        spl = splhigh();
+
+        for (int i=0; i < NUM_TLB; i++) {
+            tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
+        }
+
+        splx(spl);
     }
 
     curproc->p_addrspace->heap_end += amount;
+
+    if (amount < 0)
+        as_activate();
 
     return (void *)retval;
 }

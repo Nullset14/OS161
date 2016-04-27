@@ -247,7 +247,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 		case VM_FAULT_WRITE: {
 
 			/* Bad Call Checks */
-			if (faultaddress >= as->heap_end && faultaddress < USERSTACK - 2048 * PAGE_SIZE)
+			if (faultaddress >= as->heap_end && faultaddress < USERSTACK - 1024 * PAGE_SIZE)
 				return EFAULT;
 
 			if (faultaddress >= USERSTACK)
@@ -358,11 +358,7 @@ as_destroy(struct addrspace *as) {
 	while (temp != NULL) {
 		page_temp = temp->next;
 
-		spinlock_acquire(&mem_lock);
-		coremap[temp->ppn/PAGE_SIZE].chunk_size = 0;
-		coremap[temp->ppn/PAGE_SIZE].state=FREE;
-		spinlock_release(&mem_lock);
-
+		kfree((void *)PADDR_TO_KVADDR(temp->ppn));
 		kfree(temp);
 		temp = page_temp;
 	}
@@ -438,7 +434,6 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t sz,
 		as->addr_regions = address_temp;
 	} else {
 		address_last->next = address_temp;
-		address_last = address_last->next;
 	}
 
 	as->heap_start = address_temp->region_start + address_temp->region_size;
