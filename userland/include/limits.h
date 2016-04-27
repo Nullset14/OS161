@@ -43,7 +43,6 @@
 #define ARG_MAX         __ARG_MAX
 #define PID_MIN         __PID_MIN
 #define PID_MAX         __PID_MAX
-#define PID_MAX_256     __PID_MAX_256
 #define PIPE_BUF        __PIPE_BUF
 #define NGROUPS_MAX     __NGROUPS_MAX
 #define LOGIN_NAME_MAX  __LOGIN_NAME_MAX
